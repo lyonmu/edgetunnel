@@ -32,6 +32,9 @@ wrangler-install.log
 .env.local
 .env.*.local
 
+# 本地迁移备份，可能包含敏感配置
+.migration-backup/
+
 # 日志文件
 *.log
 npm-debug.log*
