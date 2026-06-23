@@ -10,6 +10,7 @@
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "useDefineForClassFields": true,
+    "types": ["@cloudflare/vitest-pool-workers/types"],
     "skipLibCheck": true,
     "noEmit": true
   },
