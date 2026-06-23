@@ -1,5 +1,7 @@
-export interface Env {
-  KV: KVNamespace;
-  ASSETS: Fetcher;
-  ADMIN?: string;
+declare global {
+  interface Env {
+    ADMIN?: string;
+  }
 }
+
+export {};

@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import worker from '../../src/index';
+import '../../src/app/types';
 
 describe('Worker smoke', () => {
   it('serves robots.txt', async () => {
     const env = {
       KV: {} as KVNamespace,
       ASSETS: {} as Fetcher,
-    };
+    } as Env;
     const response = await worker.fetch(new Request('https://example.com/robots.txt'), env);
 
     expect(response.status).toBe(200);

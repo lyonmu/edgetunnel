@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "edgetunnel",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-23",
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "6e59f9a2320d4e6c98a7d7a195d45c0e",
+      "preview_id": "0e717d6f1053494e82b29c359b1220a2",
+    },
+  ],
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 },
+}
