@@ -19,7 +19,7 @@ export function handleWebSocket(
   connectTCP: (host: string, port: number, data: Uint8Array | null, bridge: TransportBridge, wrapper: RemoteConnWrapper) => Promise<void>,
 ): Response {
   const pair = new WebSocketPair();
-  const [clientSock, serverSock] = Object.values(pair);
+  const [clientSock, serverSock] = Object.values(pair) as [WebSocket, WebSocket];
 
   try { (serverSock as any).accept({ allowHalfOpen: true }); }
   catch { serverSock.accept(); }
@@ -57,9 +57,9 @@ export function handleWebSocket(
       if (!data.byteLength) return;
 
       if (!wrapper.socket) {
-        const earlyBytes = decodeEarlyData(earlyDataHeader, ctx.userUUID);
+        const earlyBytes = decodeEarlyData(earlyDataHeader, ctx.userId);
         const firstPacketData = earlyBytes ? concatBytes(earlyBytes, data) : data;
-        const firstPacket = parseFirstPacket(firstPacketData, ctx.userUUID);
+        const firstPacket = parseFirstPacket(firstPacketData, ctx.userId);
         if (!firstPacket) {
           closeSocketQuietly(serverSock as any);
           return;
@@ -89,9 +89,9 @@ export function handleWebSocket(
     try { wrapper.socket?.close(); } catch { /* ignore */ }
   });
 
-  const earlyBytes = decodeEarlyData(earlyDataHeader, ctx.userUUID);
+  const earlyBytes = decodeEarlyData(earlyDataHeader, ctx.userId);
   if (earlyBytes && earlyBytes.byteLength > 0) {
-    const firstPacket = parseFirstPacket(earlyBytes, ctx.userUUID);
+    const firstPacket = parseFirstPacket(earlyBytes, ctx.userId);
     if (firstPacket) {
       connectTCP(firstPacket.hostname, firstPacket.port, firstPacket.rawData, bridge, wrapper)
         .then(() => {

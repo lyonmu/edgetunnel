@@ -58,7 +58,7 @@ export function parseGrpcPayload(payload: Uint8Array): Uint8Array {
     let offset = 1;
     let varintValid = false;
     while (offset < payload.length) {
-      const current = payload[offset++];
+      const current = payload[offset++]!;
       if ((current & 0x80) === 0) {
         varintValid = true;
         break;
@@ -76,7 +76,7 @@ export function parseGrpcFrames(data: Uint8Array): { frames: Uint8Array[]; remai
   let pending = data;
 
   while (pending.byteLength >= 5) {
-    const grpcLen = ((pending[1] << 24) >>> 0) | (pending[2] << 16) | (pending[3] << 8) | pending[4];
+    const grpcLen = ((pending[1]! << 24) >>> 0) | (pending[2]! << 16) | (pending[3]! << 8) | pending[4]!;
     const frameSize = 5 + grpcLen;
     if (pending.byteLength < frameSize) break;
     frames.push(pending.subarray(5, frameSize));
@@ -92,7 +92,19 @@ export function closeSocketQuietly(ws: WebSocket | null | undefined) {
   }
 }
 
+export function isValidWSEarlyData(bytes: Uint8Array, token: string): boolean {
+  if (!bytes?.byteLength) return false;
+  if (bytes.byteLength >= 18) {
+    try {
+      const { matchesUuid } = require('../shared/bytes');
+      if (matchesUuid(bytes, 1, token)) return true;
+    } catch { /* ignore */ }
+  }
+  return false;
+}
+
 export function wsSendAndAwait(ws: WebSocket, data: ArrayBuffer | Uint8Array): Promise<void> {
+
   if (ws.readyState !== WebSocket.OPEN) throw new Error('ws.readyState is not open');
   return new Promise<void>((resolve, reject) => {
     try {

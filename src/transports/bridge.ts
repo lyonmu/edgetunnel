@@ -59,25 +59,25 @@ export interface ParsedFirstPacket {
 
 export function parseFirstPacket(data: Uint8Array, token: string): ParsedFirstPacket | null {
   const vlessResult = parseVlessRequest(data, token);
-  if (vlessResult && !vlessResult.hasError) {
+  if (vlessResult.ok) {
     return {
       protocol: 'vless',
       hostname: vlessResult.hostname,
       port: vlessResult.port,
-      isUDP: vlessResult.isUDP,
-      rawData: vlessResult.rawClientData || new Uint8Array(0),
-      respHeader: new Uint8Array([vlessResult.version, 0]),
+      isUDP: vlessResult.command === 'udp',
+      rawData: vlessResult.payload || new Uint8Array(0),
+      respHeader: new Uint8Array([0, 0]),
     };
   }
 
   const trojanResult = parseTrojanRequest(data, token);
-  if (trojanResult && !trojanResult.hasError) {
+  if (trojanResult.ok) {
     return {
       protocol: 'trojan',
       hostname: trojanResult.hostname,
       port: trojanResult.port,
-      isUDP: trojanResult.isUDP,
-      rawData: trojanResult.rawClientData || new Uint8Array(0),
+      isUDP: trojanResult.command === 'udp',
+      rawData: trojanResult.payload || new Uint8Array(0),
       respHeader: null,
     };
   }
@@ -85,16 +85,7 @@ export function parseFirstPacket(data: Uint8Array, token: string): ParsedFirstPa
   return null;
 }
 
-export function isValidWSEarlyData(bytes: Uint8Array, token: string): boolean {
-  if (!bytes?.byteLength) return false;
-  if (bytes.byteLength >= 18) {
-    try {
-      const { matchesUuid } = require('../shared/bytes');
-      if (matchesUuid(bytes, 1, token)) return true;
-    } catch { /* ignore */ }
-  }
-  return false;
-}
+export { isValidWSEarlyData } from './common';
 
 export interface RemoteConnWrapper {
   socket: Socket | null;

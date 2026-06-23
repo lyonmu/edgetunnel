@@ -74,7 +74,7 @@ export function handleGRPC(
             pending = merged;
 
             const { frames, remainder } = parseGrpcFrames(pending);
-            pending = remainder;
+            pending = remainder as unknown as Uint8Array<ArrayBuffer>;
 
             for (const grpcPayload of frames) {
               if (!grpcPayload.byteLength) continue;
@@ -83,7 +83,7 @@ export function handleGRPC(
 
               if (isFirstFrame) {
                 isFirstFrame = false;
-                const firstPacket = parseFirstPacket(payload, ctx.userUUID);
+                const firstPacket = parseFirstPacket(payload, ctx.userId);
                 if (!firstPacket) throw new Error('Invalid first packet');
 
                 if (firstPacket.isUDP && firstPacket.protocol !== 'trojan' && firstPacket.port !== 53) {

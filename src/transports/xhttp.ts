@@ -64,7 +64,7 @@ export function handleXHTTP(
           }
 
           const firstData = firstChunk instanceof Uint8Array ? firstChunk : new Uint8Array(firstChunk);
-          const firstPacket = parseFirstPacket(firstData, ctx.userUUID);
+          const firstPacket = parseFirstPacket(firstData, ctx.userId);
           if (!firstPacket) {
             controller.close();
             return;

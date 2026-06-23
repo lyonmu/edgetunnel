@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createResponseBridge, parseFirstPacket, createRemoteConnWrapper } from '../../src/transports/bridge';
-import { createGrpcBridge } from '../../src/transports/grpc';
 
 describe('TransportBridge', () => {
   it('createResponseBridge enqueues data to controller', () => {

@@ -3,9 +3,15 @@ const GRAIN_TAIL_THRESHOLD = 512;
 const GRAIN_SILENT_MS = 0;
 const BYOB_READ_LIMIT = 64 * 1024;
 
-export function closeSocketQuietly(ws: WebSocket | null | undefined) {
+export interface Sendable {
+  readonly readyState: number;
+  send(data: any): void;
+  close?(): void;
+}
+
+export function closeSocketQuietly(ws: Sendable | null | undefined) {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    try { ws.close(); } catch { /* ignore */ }
+    try { if (ws.close) ws.close(); else (ws as WebSocket).close?.(); } catch { /* ignore */ }
   }
 }
 
@@ -15,7 +21,7 @@ export interface DownlinkSender {
   flush(): Promise<void>;
 }
 
-function wsSendAndAwait(ws: WebSocket, data: Uint8Array | ArrayBuffer): Promise<void> {
+function wsSendAndAwait(ws: Sendable, data: Uint8Array | ArrayBuffer): Promise<void> {
   if (ws.readyState !== WebSocket.OPEN) throw new Error('ws.readyState is not open');
   return new Promise<void>((resolve, reject) => {
     try {
@@ -27,7 +33,7 @@ function wsSendAndAwait(ws: WebSocket, data: Uint8Array | ArrayBuffer): Promise<
   });
 }
 
-export function createDownloadGrainSender(ws: WebSocket, headerData: Uint8Array | null = null): DownlinkSender {
+export function createDownloadGrainSender(ws: Sendable, headerData: Uint8Array | null = null): DownlinkSender {
   let header = headerData;
   let pendingBuffer = new Uint8Array(GRAIN_PACKET_BYTES);
   let pendingBytes = 0;
@@ -131,7 +137,7 @@ export function createDownloadGrainSender(ws: WebSocket, headerData: Uint8Array 
 
 export async function connectStreams(
   remoteSocket: { readable: ReadableStream; writable?: WritableStream },
-  webSocket: WebSocket,
+  webSocket: Sendable,
   headerData: Uint8Array | null,
   retryFunc?: () => Promise<void>,
 ): Promise<void> {
