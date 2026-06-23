@@ -1,14 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  socks5Connect,
-  httpConnect,
-  httpsConnect,
   parseSocks5Address,
   isIPv4,
   isIPHostname,
   stripIPv6Brackets,
 } from '../../src/networking/proxy-connectors';
-import type { ProxyAddress } from '../../src/app/types';
 
 describe('parseSocks5Address', () => {
   it('parses user:pass@host:port', () => {

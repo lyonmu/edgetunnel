@@ -11,7 +11,7 @@ export async function handleSubscriptionRequest(context: RequestContext): Promis
     return null;
   }
 
-  const { url, request, env } = context;
+  const { url, request } = context;
   const ua = request.headers.get('User-Agent') || '';
 
   const subscriptionType = detectSubscriptionType(url, ua);
@@ -34,14 +34,18 @@ export async function handleSubscriptionRequest(context: RequestContext): Promis
       const mixedContent = await generateMixedSubscription(context);
       const converterUrl = buildConverterUrl(url, subscriptionType, mixedContent, context);
 
-      const response = await fetchTextLimited(converterUrl, {
-        headers: {
-          'User-Agent': `Subconverter for ${subscriptionType} edgetunnel`,
+      const response = await fetchTextLimited(
+        converterUrl,
+        {
+          headers: {
+            'User-Agent': `Subconverter for ${subscriptionType} edgetunnel`,
+          },
         },
-      }, {
-        timeoutMs: 10000,
-        maxBytes: 1024 * 1024,
-      });
+        {
+          timeoutMs: 10000,
+          maxBytes: 1024 * 1024,
+        },
+      );
 
       if (!response.ok) {
         return new Response('订阅转换后端异常：' + response.statusText, {
@@ -87,11 +91,21 @@ function detectSubscriptionType(url: URL, ua: string): SubscriptionType {
     return url.searchParams.get('target') as SubscriptionType;
   }
 
-  if (url.searchParams.has('clash') || uaLower.includes('clash') || uaLower.includes('meta') || uaLower.includes('mihomo')) {
+  if (
+    url.searchParams.has('clash') ||
+    uaLower.includes('clash') ||
+    uaLower.includes('meta') ||
+    uaLower.includes('mihomo')
+  ) {
     return 'clash';
   }
 
-  if (url.searchParams.has('sb') || url.searchParams.has('singbox') || uaLower.includes('singbox') || uaLower.includes('sing-box')) {
+  if (
+    url.searchParams.has('sb') ||
+    url.searchParams.has('singbox') ||
+    uaLower.includes('singbox') ||
+    uaLower.includes('sing-box')
+  ) {
     return 'singbox';
   }
 

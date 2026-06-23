@@ -18,6 +18,8 @@ declare global {
     OFF_LOG?: string;
     BEST_SUB?: string;
     PRELOAD_RACE_DIAL?: string;
+    SUBAPI?: string;
+    SUBCONFIG?: string;
   }
 }
 

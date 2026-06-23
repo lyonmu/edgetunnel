@@ -2,16 +2,21 @@ const WS_EARLY_DATA_MAX_HEADER = 2048;
 const WS_EARLY_DATA_MAX_BYTES = 8 * 1024;
 
 export function decodeEarlyData(header: string, token: string | null): Uint8Array | null {
+  void token;
   if (!header) return null;
   if (header.length > WS_EARLY_DATA_MAX_HEADER) throw new Error('early data is too large');
 
   let bytes: Uint8Array | null = null;
   try {
-    const U8 = Uint8Array as any;
+    const U8 = Uint8Array as typeof Uint8Array & {
+      fromBase64?: (value: string, options: { alphabet: 'base64url' }) => Uint8Array;
+    };
     if (typeof U8.fromBase64 === 'function') {
       bytes = U8.fromBase64(header, { alphabet: 'base64url' });
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   if (!bytes) {
     let normalized = header.replace(/-/g, '+').replace(/_/g, '/');
@@ -76,7 +81,8 @@ export function parseGrpcFrames(data: Uint8Array): { frames: Uint8Array[]; remai
   let pending = data;
 
   while (pending.byteLength >= 5) {
-    const grpcLen = ((pending[1]! << 24) >>> 0) | (pending[2]! << 16) | (pending[3]! << 8) | pending[4]!;
+    const grpcLen =
+      ((pending[1]! << 24) >>> 0) | (pending[2]! << 16) | (pending[3]! << 8) | pending[4]!;
     const frameSize = 5 + grpcLen;
     if (pending.byteLength < frameSize) break;
     frames.push(pending.subarray(5, frameSize));
@@ -88,23 +94,23 @@ export function parseGrpcFrames(data: Uint8Array): { frames: Uint8Array[]; remai
 
 export function closeSocketQuietly(ws: WebSocket | null | undefined) {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    try { ws.close(); } catch { /* ignore */ }
+    try {
+      ws.close();
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 export function isValidWSEarlyData(bytes: Uint8Array, token: string): boolean {
   if (!bytes?.byteLength) return false;
   if (bytes.byteLength >= 18) {
-    try {
-      const { matchesUuid } = require('../shared/bytes');
-      if (matchesUuid(bytes, 1, token)) return true;
-    } catch { /* ignore */ }
+    if (matchesUuid(bytes, 1, token)) return true;
   }
   return false;
 }
 
 export function wsSendAndAwait(ws: WebSocket, data: ArrayBuffer | Uint8Array): Promise<void> {
-
   if (ws.readyState !== WebSocket.OPEN) throw new Error('ws.readyState is not open');
   return new Promise<void>((resolve, reject) => {
     try {
@@ -115,3 +121,4 @@ export function wsSendAndAwait(ws: WebSocket, data: ArrayBuffer | Uint8Array): P
     }
   });
 }
+import { matchesUuid } from '../shared/bytes';

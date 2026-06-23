@@ -20,8 +20,8 @@ describe('parseVlessRequest', () => {
     const uuidBytes = new Uint8Array(16);
     const clean = uuid.replace(/-/g, '');
     for (let i = 0; i < 16; i++) {
-      const high = parseInt(clean[i * 2], 16);
-      const low = parseInt(clean[i * 2 + 1], 16);
+      const high = parseInt(clean[i * 2]!, 16);
+      const low = parseInt(clean[i * 2 + 1]!, 16);
       uuidBytes[i] = (high << 4) | low;
     }
     parts.push(uuidBytes);
@@ -57,7 +57,14 @@ describe('parseVlessRequest', () => {
 
   it('parses IPv4 address', () => {
     const payload = new Uint8Array([1, 2, 3, 4]);
-    const packet = createVlessPacket(testUuid, 1, 1, new Uint8Array([192, 168, 1, 1]), 443, payload);
+    const packet = createVlessPacket(
+      testUuid,
+      1,
+      1,
+      new Uint8Array([192, 168, 1, 1]),
+      443,
+      payload,
+    );
 
     const result = parseVlessRequest(packet, testUuid);
 
@@ -85,7 +92,14 @@ describe('parseVlessRequest', () => {
 
   it('rejects invalid uuid', () => {
     const payload = new Uint8Array([1, 2, 3, 4]);
-    const packet = createVlessPacket(testUuid, 1, 1, new Uint8Array([192, 168, 1, 1]), 443, payload);
+    const packet = createVlessPacket(
+      testUuid,
+      1,
+      1,
+      new Uint8Array([192, 168, 1, 1]),
+      443,
+      payload,
+    );
 
     const result = parseVlessRequest(packet, '00000000-0000-0000-0000-000000000000');
 

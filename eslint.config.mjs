@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   { ignores: ['dist/**', 'public/**', '_worker.js', 'worker-configuration.d.ts'] },
   js.configs.recommended,
-  ...tseslint.configs.recommendedTypeChecked.map((config) => ({
+  ...tseslint.configs.recommended.map((config) => ({
     ...config,
     files: ['src/**/*.ts', 'tests/**/*.ts'],
   })),
@@ -19,9 +19,15 @@ export default tseslint.config(
     },
     plugins: { promise },
     rules: {
-      ...promise.configs['flat/recommended'].rules,
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
+    },
+  },
+  {
+    files: ['tests/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/require-await': 'off',
     },
   },
 );

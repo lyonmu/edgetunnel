@@ -4,6 +4,10 @@ export function toUint8Array(value: ArrayBuffer | ArrayBufferView): Uint8Array {
   return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
 }
 
+export function toOwnedUint8Array(value: Uint8Array): Uint8Array<ArrayBuffer> {
+  return new Uint8Array(value);
+}
+
 export function concatBytes(...chunks: readonly Uint8Array[]): Uint8Array {
   let totalLength = 0;
   for (const chunk of chunks) {
@@ -24,7 +28,7 @@ const uuidByteCache = new Map<string, Uint8Array>();
 
 export function decodeUuid(uuid: string): Uint8Array | null {
   const key = String(uuid || '');
-  let cached = uuidByteCache.get(key);
+  const cached = uuidByteCache.get(key);
   if (cached) return cached;
 
   const clean = key.replace(/-/g, '');

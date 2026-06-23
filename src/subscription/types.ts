@@ -44,4 +44,11 @@ export interface SubscriptionContext {
   optimizeSubscription: OptimizeSubscriptionConfig;
 }
 
-export type SubscriptionType = 'mixed' | 'base64' | 'clash' | 'singbox' | 'surge' | 'quanx' | 'loon';
+export type SubscriptionType =
+  | 'mixed'
+  | 'base64'
+  | 'clash'
+  | 'singbox'
+  | 'surge'
+  | 'quanx'
+  | 'loon';

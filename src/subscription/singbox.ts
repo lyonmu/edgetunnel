@@ -13,7 +13,9 @@ export async function applySingboxPatch(content: string, context: RequestContext
         config.dns.servers = [];
       }
 
-      const hasFakeip = config.dns.servers.some((s: any) => s?.type === 'fakeip');
+      const hasFakeip = config.dns.servers.some(
+        (server: { type?: string } | null) => server?.type === 'fakeip',
+      );
       if (!hasFakeip) {
         config.dns.servers.push({
           type: 'fakeip',

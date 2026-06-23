@@ -13,8 +13,10 @@ describe('TlsRecordParser', () => {
     const fragment = new Uint8Array([0x01, 0x02, 0x03]);
     const record = new Uint8Array([
       0x16, // ContentType: Handshake
-      0x03, 0x01, // Version: TLS 1.0
-      0x00, 0x03, // Length: 3
+      0x03,
+      0x01, // Version: TLS 1.0
+      0x00,
+      0x03, // Length: 3
       ...fragment,
     ]);
     parser.feed(record);
@@ -62,7 +64,9 @@ describe('TlsHandshakeParser', () => {
     const body = new Uint8Array([0x01, 0x02, 0x03]);
     const message = new Uint8Array([
       0x01, // HandshakeType: ClientHello
-      0x00, 0x00, 0x03, // Length: 3
+      0x00,
+      0x00,
+      0x03, // Length: 3
       ...body,
     ]);
     parser.feed(message);

@@ -1,6 +1,5 @@
 import { createUploadQueue } from '../networking/upload-queue';
 import { closeSocketQuietly } from '../networking/stream-pump';
-import { decodeEarlyData } from './common';
 import {
   createResponseBridge,
   createRemoteConnWrapper,
@@ -13,7 +12,13 @@ import type { RequestContext } from '../app/types';
 export function handleXHTTP(
   request: Request,
   ctx: RequestContext,
-  connectTCP: (host: string, port: number, data: Uint8Array | null, bridge: TransportBridge, wrapper: RemoteConnWrapper) => Promise<void>,
+  connectTCP: (
+    host: string,
+    port: number,
+    data: Uint8Array | null,
+    bridge: TransportBridge,
+    wrapper: RemoteConnWrapper,
+  ) => Promise<void>,
 ): Response {
   if (!request.body) return new Response('Bad Request', { status: 400 });
 
@@ -35,7 +40,7 @@ export function handleXHTTP(
         const getRemoteWriter = () => {
           const socket = wrapper.socket;
           if (!socket) return null;
-          return (socket as any).writable.getWriter();
+          return socket.writable.getWriter();
         };
 
         const uploadQueue = (uploadQueueRef = createUploadQueue({
@@ -46,8 +51,12 @@ export function handleXHTTP(
             await wrapper.retryConnect();
           },
           closeConnection: () => {
-            try { wrapper.socket?.close(); } catch { /* ignore */ }
-            closeSocketQuietly(bridge as any);
+            try {
+              void wrapper.socket?.close();
+            } catch {
+              /* ignore */
+            }
+            closeSocketQuietly(bridge);
           },
           name: 'XHTTP上行',
         }));
@@ -63,39 +72,62 @@ export function handleXHTTP(
             return;
           }
 
-          const firstData = firstChunk instanceof Uint8Array ? firstChunk : new Uint8Array(firstChunk);
+          const firstData =
+            firstChunk instanceof Uint8Array ? firstChunk : new Uint8Array(firstChunk);
           const firstPacket = parseFirstPacket(firstData, ctx.userId);
           if (!firstPacket) {
             controller.close();
             return;
           }
 
-          await connectTCP(firstPacket.hostname, firstPacket.port, firstPacket.rawData, bridge, wrapper);
+          await connectTCP(
+            firstPacket.hostname,
+            firstPacket.port,
+            firstPacket.rawData,
+            bridge,
+            wrapper,
+          );
 
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            if (!value || (value as any).byteLength === 0) continue;
-            const chunk = value instanceof Uint8Array ? value : new Uint8Array(value as any);
+            if (!value || value.byteLength === 0) continue;
+            const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
             if (!(await writeToRemote(chunk))) throw new Error('Remote socket is not ready');
           }
 
           await uploadQueue.waitIdle();
           const writer = getRemoteWriter();
           if (writer) {
-            try { await writer.close(); } catch { /* ignore */ }
+            try {
+              await writer.close();
+            } catch {
+              /* ignore */
+            }
           }
-        } catch (err) {
-          closeSocketQuietly(bridge as any);
+        } catch {
+          closeSocketQuietly(bridge);
         } finally {
           uploadQueue.clear();
-          try { reader.releaseLock(); } catch { /* ignore */ }
+          try {
+            reader.releaseLock();
+          } catch {
+            /* ignore */
+          }
         }
       },
       cancel() {
         uploadQueueRef?.clear();
-        try { wrapper.socket?.close(); } catch { /* ignore */ }
-        try { reader.releaseLock(); } catch { /* ignore */ }
+        try {
+          void wrapper.socket?.close();
+        } catch {
+          /* ignore */
+        }
+        try {
+          reader.releaseLock();
+        } catch {
+          /* ignore */
+        }
       },
     }),
     { status: 200, headers: responseHeaders },

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDownloadGrainSender, connectStreams, closeSocketQuietly } from '../../src/networking/stream-pump';
+import { createDownloadGrainSender, closeSocketQuietly } from '../../src/networking/stream-pump';
 
 describe('closeSocketQuietly', () => {
   it('closes an open WebSocket', () => {
@@ -15,7 +15,12 @@ describe('closeSocketQuietly', () => {
   });
 
   it('catches close errors', () => {
-    const ws = { readyState: 1, close: vi.fn(() => { throw new Error('fail'); }) } as any;
+    const ws = {
+      readyState: 1,
+      close: vi.fn(() => {
+        throw new Error('fail');
+      }),
+    } as any;
     expect(() => closeSocketQuietly(ws)).not.toThrow();
   });
 });
@@ -25,7 +30,9 @@ describe('createDownloadGrainSender', () => {
     const sent: Uint8Array[] = [];
     const ws = {
       readyState: 1,
-      send: vi.fn(async (data: Uint8Array) => { sent.push(data); }),
+      send: vi.fn(async (data: Uint8Array) => {
+        sent.push(data);
+      }),
     } as any;
 
     const sender = createDownloadGrainSender(ws);

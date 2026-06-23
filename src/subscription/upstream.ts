@@ -53,6 +53,6 @@ export async function fetchOptimizedIPs(
 function parseIPList(text: string): string[] {
   return text
     .split('\n')
-    .map(line => line.trim())
-    .filter(line => line && !line.startsWith('#'));
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
 }

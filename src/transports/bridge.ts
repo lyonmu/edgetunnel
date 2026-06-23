@@ -1,9 +1,6 @@
-import { createUploadQueue } from '../networking/upload-queue';
-import { connectStreams, closeSocketQuietly } from '../networking/stream-pump';
-import { decodeEarlyData } from './common';
+import { closeSocketQuietly } from '../networking/stream-pump';
 import { parseVlessRequest } from '../protocols/vless';
 import { parseTrojanRequest } from '../protocols/trojan';
-import type { RequestContext } from '../app/types';
 
 export interface TransportBridge {
   readyState: number;
@@ -13,10 +10,16 @@ export interface TransportBridge {
 
 export function createWebSocketBridge(ws: WebSocket): TransportBridge {
   return {
-    get readyState() { return ws.readyState; },
+    get readyState() {
+      return ws.readyState;
+    },
     send(data) {
       if (ws.readyState === WebSocket.OPEN) {
-        try { ws.send(data); } catch { /* ignore */ }
+        try {
+          ws.send(data);
+        } catch {
+          /* ignore */
+        }
       }
     },
     close() {
@@ -32,7 +35,7 @@ export function createResponseBridge(controller: ReadableStreamDefaultController
     send(data) {
       if (closed) return;
       try {
-        const chunk = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
+        const chunk = data instanceof Uint8Array ? data : new Uint8Array(data);
         controller.enqueue(chunk);
       } catch {
         closed = true;
@@ -43,7 +46,11 @@ export function createResponseBridge(controller: ReadableStreamDefaultController
       if (closed) return;
       closed = true;
       this.readyState = WebSocket.CLOSED;
-      try { controller.close(); } catch { /* ignore */ }
+      try {
+        controller.close();
+      } catch {
+        /* ignore */
+      }
     },
   };
 }

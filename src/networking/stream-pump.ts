@@ -5,13 +5,18 @@ const BYOB_READ_LIMIT = 64 * 1024;
 
 export interface Sendable {
   readonly readyState: number;
-  send(data: any): void;
+  send(data: ArrayBuffer | ArrayBufferView): void;
   close?(): void;
 }
 
 export function closeSocketQuietly(ws: Sendable | null | undefined) {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    try { if (ws.close) ws.close(); else (ws as WebSocket).close?.(); } catch { /* ignore */ }
+    try {
+      if (ws.close) ws.close();
+      else (ws as WebSocket).close?.();
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -28,12 +33,15 @@ function wsSendAndAwait(ws: Sendable, data: Uint8Array | ArrayBuffer): Promise<v
       ws.send(data);
       resolve();
     } catch (err) {
-      reject(err);
+      reject(err instanceof Error ? err : new Error(String(err)));
     }
   });
 }
 
-export function createDownloadGrainSender(ws: Sendable, headerData: Uint8Array | null = null): DownlinkSender {
+export function createDownloadGrainSender(
+  ws: Sendable,
+  headerData: Uint8Array | null = null,
+): DownlinkSender {
   let header = headerData;
   let pendingBuffer = new Uint8Array(GRAIN_PACKET_BYTES);
   let pendingBytes = 0;
@@ -68,7 +76,9 @@ export function createDownloadGrainSender(ws: Sendable, headerData: Uint8Array |
     pendingBuffer = new Uint8Array(GRAIN_PACKET_BYTES);
     pendingBytes = 0;
     waitRounds = 0;
-    flushPromise = sendRaw(output).finally(() => { flushPromise = null; });
+    flushPromise = sendRaw(output).finally(() => {
+      flushPromise = null;
+    });
     return flushPromise;
   };
 
@@ -83,21 +93,28 @@ export function createDownloadGrainSender(ws: Sendable, headerData: Uint8Array |
         flush().catch(() => closeSocketQuietly(ws));
         return;
       }
-      flushTimer = setTimeout(() => {
-        flushTimer = null;
-        if (!pendingBytes) return;
-        if (GRAIN_PACKET_BYTES - pendingBytes < GRAIN_TAIL_THRESHOLD) {
+      flushTimer = setTimeout(
+        () => {
+          flushTimer = null;
+          if (!pendingBytes) return;
+          if (GRAIN_PACKET_BYTES - pendingBytes < GRAIN_TAIL_THRESHOLD) {
+            flush().catch(() => closeSocketQuietly(ws));
+            return;
+          }
+          if (
+            waitRounds < 2 &&
+            (generation !== scheduledGeneration ||
+              pendingBytes < Math.max(4096, GRAIN_TAIL_THRESHOLD << 3))
+          ) {
+            waitRounds++;
+            scheduledGeneration = generation;
+            scheduleFlush();
+            return;
+          }
           flush().catch(() => closeSocketQuietly(ws));
-          return;
-        }
-        if (waitRounds < 2 && (generation !== scheduledGeneration || pendingBytes < Math.max(4096, GRAIN_TAIL_THRESHOLD << 3))) {
-          waitRounds++;
-          scheduledGeneration = generation;
-          scheduleFlush();
-          return;
-        }
-        flush().catch(() => closeSocketQuietly(ws));
-      }, Math.max(GRAIN_SILENT_MS, 1));
+        },
+        Math.max(GRAIN_SILENT_MS, 1),
+      );
     });
   };
 
@@ -117,7 +134,8 @@ export function createDownloadGrainSender(ws: Sendable, headerData: Uint8Array |
       while (offset < totalBytes) {
         if (!pendingBytes && totalBytes - offset >= GRAIN_PACKET_BYTES) {
           const sendBytes = Math.min(GRAIN_PACKET_BYTES, totalBytes - offset);
-          const view = offset || sendBytes !== totalBytes ? chunk.subarray(offset, offset + sendBytes) : chunk;
+          const view =
+            offset || sendBytes !== totalBytes ? chunk.subarray(offset, offset + sendBytes) : chunk;
           await sendRaw(view);
           offset += sendBytes;
           continue;
@@ -127,7 +145,11 @@ export function createDownloadGrainSender(ws: Sendable, headerData: Uint8Array |
         pendingBytes += copyBytes;
         offset += copyBytes;
         generation++;
-        if (pendingBytes === GRAIN_PACKET_BYTES || GRAIN_PACKET_BYTES - pendingBytes < GRAIN_TAIL_THRESHOLD) await flush();
+        if (
+          pendingBytes === GRAIN_PACKET_BYTES ||
+          GRAIN_PACKET_BYTES - pendingBytes < GRAIN_TAIL_THRESHOLD
+        )
+          await flush();
         else scheduleFlush();
       }
     },
@@ -136,20 +158,21 @@ export function createDownloadGrainSender(ws: Sendable, headerData: Uint8Array |
 }
 
 export async function connectStreams(
-  remoteSocket: { readable: ReadableStream; writable?: WritableStream },
+  remoteSocket: { readable: ReadableStream<Uint8Array>; writable?: WritableStream<Uint8Array> },
   webSocket: Sendable,
   headerData: Uint8Array | null,
   retryFunc?: () => Promise<void>,
 ): Promise<void> {
-  let header = headerData;
   let hasData = false;
   let reader: ReadableStreamDefaultReader<Uint8Array> | ReadableStreamBYOBReader;
   let useBYOB = false;
-  const downlinkSender = createDownloadGrainSender(webSocket, header);
-  header = null;
+  const downlinkSender = createDownloadGrainSender(webSocket, headerData);
 
   try {
-    reader = remoteSocket.readable.getReader({ mode: 'byob' } as any);
+    const byobReadable = remoteSocket.readable as ReadableStream<Uint8Array> & {
+      getReader(options: { mode: 'byob' }): ReadableStreamBYOBReader;
+    };
+    reader = byobReadable.getReader({ mode: 'byob' });
     useBYOB = true;
   } catch {
     reader = remoteSocket.readable.getReader();
@@ -179,7 +202,10 @@ export async function connectStreams(
           readBuffer = new ArrayBuffer(BYOB_READ_LIMIT);
         } else {
           await downlinkSender.send(value);
-          readBuffer = (value as any).buffer.byteLength >= BYOB_READ_LIMIT ? (value as any).buffer : new ArrayBuffer(BYOB_READ_LIMIT);
+          readBuffer =
+            value.buffer instanceof ArrayBuffer && value.buffer.byteLength >= BYOB_READ_LIMIT
+              ? value.buffer
+              : new ArrayBuffer(BYOB_READ_LIMIT);
         }
       }
     }
@@ -187,8 +213,16 @@ export async function connectStreams(
   } catch {
     closeSocketQuietly(webSocket);
   } finally {
-    try { await (reader as any).cancel(); } catch { /* ignore */ }
-    try { (reader as any).releaseLock(); } catch { /* ignore */ }
+    try {
+      await reader.cancel();
+    } catch {
+      /* ignore */
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore */
+    }
   }
   if (!hasData && retryFunc) await retryFunc();
 }

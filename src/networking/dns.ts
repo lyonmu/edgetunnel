@@ -40,14 +40,15 @@ function parseDnsName(buf: Uint8Array, pos: number): [string, number] {
   let endPos = -1;
   let safe = 128;
   while (p < buf.length && safe-- > 0) {
-    const len = buf[p];
+    const len = buf[p]!;
     if (len === 0) {
       if (!jumped) endPos = p + 1;
       break;
     }
     if ((len & 0xc0) === 0xc0) {
       if (!jumped) endPos = p + 2;
-      p = ((len & 0x3f) << 8) | buf[p + 1];
+      if (p + 1 >= buf.length) break;
+      p = ((len & 0x3f) << 8) | buf[p + 1]!;
       jumped = true;
       continue;
     }
@@ -59,13 +60,13 @@ function parseDnsName(buf: Uint8Array, pos: number): [string, number] {
 }
 
 function parseA(rdata: Uint8Array): string {
-  return `${rdata[0]}.${rdata[1]}.${rdata[2]}.${rdata[3]}`;
+  return `${rdata[0]!}.${rdata[1]!}.${rdata[2]!}.${rdata[3]!}`;
 }
 
 function parseAAAA(rdata: Uint8Array): string {
   const segs: string[] = [];
   for (let j = 0; j < 16; j += 2) {
-    segs.push(((rdata[j] << 8) | rdata[j + 1]).toString(16));
+    segs.push(((rdata[j]! << 8) | rdata[j + 1]!).toString(16));
   }
   return segs.join(':');
 }
@@ -74,7 +75,7 @@ function parseTXT(rdata: Uint8Array): string {
   let tOff = 0;
   const parts: string[] = [];
   while (tOff < rdata.length) {
-    const tLen = rdata[tOff++];
+    const tLen = rdata[tOff++]!;
     parts.push(new TextDecoder().decode(rdata.slice(tOff, tOff + tLen)));
     tOff += tLen;
   }
@@ -136,7 +137,7 @@ export async function resolveDns(
     const qname = encodeDnsName(domain);
     const query = new Uint8Array(12 + qname.length + 4);
     const qview = new DataView(query.buffer);
-    qview.setUint16(0, crypto.getRandomValues(new Uint16Array(1))[0]);
+    qview.setUint16(0, crypto.getRandomValues(new Uint16Array(1))[0]!);
     qview.setUint16(2, 0x0100); // RD=1
     qview.setUint16(4, 1); // QDCOUNT
     query.set(qname, 12);
@@ -147,7 +148,7 @@ export async function resolveDns(
       method: 'POST',
       headers: {
         'Content-Type': 'application/dns-message',
-        'Accept': 'application/dns-message',
+        Accept: 'application/dns-message',
       },
       body: query,
     });

@@ -1,7 +1,13 @@
 import type { RequestContext } from '../app/types';
 import type { TransportBridge, RemoteConnWrapper } from '../transports/bridge';
 import { connectStreams, closeSocketQuietly } from './stream-pump';
-import { openSocket, raceSockets, writeInitialData, cloudflareSocketConnector, type DialCandidate } from './sockets';
+import {
+  openSocket,
+  raceSockets,
+  writeInitialData,
+  cloudflareSocketConnector,
+  type DialCandidate,
+} from './sockets';
 import { socks5Connect, httpConnect, httpsConnect } from './proxy-connectors';
 
 export type ConnectTCPFn = (
@@ -24,10 +30,11 @@ export function createConnectTCP(ctx: RequestContext): ConnectTCPFn {
     port: number,
     data: Uint8Array | null,
   ): Promise<Socket> {
-    const candidates: DialCandidate[] = Array.from(
-      { length: dialConcurrency },
-      (_, i) => ({ hostname: host, port, index: i }),
-    );
+    const candidates: DialCandidate[] = Array.from({ length: dialConcurrency }, (_, i) => ({
+      hostname: host,
+      port,
+      index: i,
+    }));
     let socket: Socket;
     if (candidates.length === 1) {
       socket = await openSocket(connector, candidates[0]!, CONNECT_TIMEOUT_MS);
@@ -86,8 +93,8 @@ export function createConnectTCP(ctx: RequestContext): ConnectTCPFn {
 
       if (shouldSendData) sentViaProxy = true;
       wrapper.socket = socket;
-      socket.closed.catch(() => {}).finally(() => closeSocketQuietly(bridge as any));
-      connectStreams(socket, bridge, null, undefined);
+      void socket.closed.finally(() => closeSocketQuietly(bridge)).catch(() => {});
+      void connectStreams(socket, bridge, null, undefined);
     })();
 
     wrapper.connectingPromise = task;
@@ -111,8 +118,8 @@ export function createConnectTCP(ctx: RequestContext): ConnectTCPFn {
         }
         if (data && data.byteLength > 0) sentViaProxy = true;
         wrapper.socket = socket;
-        socket.closed.catch(() => {}).finally(() => closeSocketQuietly(bridge as any));
-        connectStreams(socket, bridge, null, undefined);
+        void socket.closed.finally(() => closeSocketQuietly(bridge)).catch(() => {});
+        void connectStreams(socket, bridge, null, undefined);
       })();
       wrapper.connectingPromise = retryTask;
       try {

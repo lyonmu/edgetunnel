@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { decodeEarlyData, isValidWSEarlyData, buildGrpcFrame, parseGrpcFrames } from '../../src/transports/common';
+import { decodeEarlyData, buildGrpcFrame, parseGrpcFrames } from '../../src/transports/common';
 
 describe('decodeEarlyData', () => {
   it('decodes valid base64url', () => {
-    const input = btoa(String.fromCharCode(0x01, 0x02, 0x03)).replace(/\+/g, '-').replace(/\//g, '_');
+    const input = btoa(String.fromCharCode(0x01, 0x02, 0x03))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
     const result = decodeEarlyData(input, null);
     expect(result).not.toBeNull();
     expect(result!.byteLength).toBe(3);
@@ -25,7 +27,8 @@ describe('buildGrpcFrame', () => {
     // gRPC length prefix: bytes 0-3 = 0, byte 4 = protobufLen
     expect(frame[0]).toBe(0);
     // protobufLen = 1 (tag 0x0a) + 1 (varint 3) + 3 (payload) = 5
-    const protobufLen = ((frame[1] << 24) >>> 0) | (frame[2] << 16) | (frame[3] << 8) | frame[4];
+    const protobufLen =
+      ((frame[1]! << 24) >>> 0) | (frame[2]! << 16) | (frame[3]! << 8) | frame[4]!;
     expect(protobufLen).toBe(5);
     // protobuf field tag
     expect(frame[5]).toBe(0x0a);
@@ -43,7 +46,11 @@ describe('parseGrpcFrames', () => {
     const payload = new Uint8Array([0x0a, 0x02, 0xaa, 0xbb]);
     const grpcLen = payload.length;
     const frame = new Uint8Array([
-      0, (grpcLen >>> 24) & 0xff, (grpcLen >>> 16) & 0xff, (grpcLen >>> 8) & 0xff, grpcLen & 0xff,
+      0,
+      (grpcLen >>> 24) & 0xff,
+      (grpcLen >>> 16) & 0xff,
+      (grpcLen >>> 8) & 0xff,
+      grpcLen & 0xff,
       ...payload,
     ]);
     const { frames, remainder } = parseGrpcFrames(frame);

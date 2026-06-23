@@ -5,10 +5,12 @@ describe('createUploadQueue', () => {
   function makeFakeWriter() {
     const writes: Uint8Array[] = [];
     const writer = {
-      write: vi.fn(async (chunk: Uint8Array) => { writes.push(chunk); }),
+      write: vi.fn(async (chunk: Uint8Array) => {
+        writes.push(chunk);
+      }),
       releaseLock: vi.fn(),
     };
-    return { writer, writes };
+    return { writer: writer as unknown as WritableStreamDefaultWriter<Uint8Array>, writes };
   }
 
   it('enqueues and drains data', async () => {

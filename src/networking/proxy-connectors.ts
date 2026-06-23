@@ -26,7 +26,12 @@ export function parseSocks5Address(address: string, defaultPort: number): ProxyA
     const hostname = hostPart.slice(1, closeBracket);
     const rest = hostPart.slice(closeBracket + 1);
     const port = rest.startsWith(':') ? parseInt(rest.slice(1), 10) : defaultPort;
-    return { username, password, hostname, port };
+    return {
+      ...(username === undefined ? {} : { username }),
+      ...(password === undefined ? {} : { password }),
+      hostname,
+      port,
+    };
   }
 
   const lastColon = hostPart.lastIndexOf(':');
@@ -40,7 +45,12 @@ export function parseSocks5Address(address: string, defaultPort: number): ProxyA
   }
 
   const port = portPart ? parseInt(portPart, 10) : defaultPort;
-  return { username, password, hostname: hostPart, port };
+  return {
+    ...(username === undefined ? {} : { username }),
+    ...(password === undefined ? {} : { password }),
+    hostname: hostPart,
+    port,
+  };
 }
 
 export function isIPv4(hostname: string): boolean {
@@ -80,45 +90,71 @@ export async function socks5Connect(
   const writer = socket.writable.getWriter();
   const reader = socket.readable.getReader();
   try {
-    const authMethods = username && password
-      ? new Uint8Array([0x05, 0x02, 0x00, 0x02])
-      : new Uint8Array([0x05, 0x01, 0x00]);
+    const authMethods =
+      username && password
+        ? new Uint8Array([0x05, 0x02, 0x00, 0x02])
+        : new Uint8Array([0x05, 0x01, 0x00]);
     await writer.write(authMethods);
     let response = await reader.read();
-    if (response.done || response.value.byteLength < 2) throw new Error('S5 method selection failed');
+    if (response.done || response.value.byteLength < 2)
+      throw new Error('S5 method selection failed');
 
     const selectedMethod = new Uint8Array(response.value)[1];
     if (selectedMethod === 0x02) {
       if (!username || !password) throw new Error('S5 requires authentication');
       const userBytes = new TextEncoder().encode(username);
       const passBytes = new TextEncoder().encode(password);
-      const authPacket = new Uint8Array([0x01, userBytes.length, ...userBytes, passBytes.length, ...passBytes]);
+      const authPacket = new Uint8Array([
+        0x01,
+        userBytes.length,
+        ...userBytes,
+        passBytes.length,
+        ...passBytes,
+      ]);
       await writer.write(authPacket);
       response = await reader.read();
-      if (response.done || new Uint8Array(response.value)[1] !== 0x00) throw new Error('S5 authentication failed');
+      if (response.done || new Uint8Array(response.value)[1] !== 0x00)
+        throw new Error('S5 authentication failed');
     } else if (selectedMethod !== 0x00) {
       throw new Error(`S5 unsupported auth method: ${selectedMethod}`);
     }
 
     const hostBytes = new TextEncoder().encode(targetHost);
     const connectPacket = new Uint8Array([
-      0x05, 0x01, 0x00, 0x03,
+      0x05,
+      0x01,
+      0x00,
+      0x03,
       hostBytes.length,
       ...hostBytes,
-      targetPort >> 8, targetPort & 0xff,
+      targetPort >> 8,
+      targetPort & 0xff,
     ]);
     await writer.write(connectPacket);
     response = await reader.read();
-    if (response.done || new Uint8Array(response.value)[1] !== 0x00) throw new Error('S5 connection failed');
+    if (response.done || new Uint8Array(response.value)[1] !== 0x00)
+      throw new Error('S5 connection failed');
 
     if (initialData && initialData.byteLength > 0) await writer.write(initialData);
     writer.releaseLock();
     reader.releaseLock();
     return socket;
   } catch (error) {
-    try { writer.releaseLock(); } catch { /* ignore */ }
-    try { reader.releaseLock(); } catch { /* ignore */ }
-    try { socket.close(); } catch { /* ignore */ }
+    try {
+      writer.releaseLock();
+    } catch {
+      /* ignore */
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore */
+    }
+    try {
+      void socket.close();
+    } catch {
+      /* ignore */
+    }
     throw error;
   }
 }
@@ -142,9 +178,10 @@ export async function httpConnect(
   try {
     if (https) await socket.opened;
 
-    const auth = username && password
-      ? `Proxy-Authorization: Basic ${btoa(`${username}:${password}`)}\r\n`
-      : '';
+    const auth =
+      username && password
+        ? `Proxy-Authorization: Basic ${btoa(`${username}:${password}`)}\r\n`
+        : '';
     const request = `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\nHost: ${targetHost}:${targetPort}\r\n${auth}User-Agent: Mozilla/5.0\r\nConnection: keep-alive\r\n\r\n`;
     await writer.write(encoder.encode(request));
     writer.releaseLock();
@@ -154,7 +191,8 @@ export async function httpConnect(
     let bytesRead = 0;
     while (headerEndIndex === -1 && bytesRead < 8192) {
       const { done, value } = await reader.read();
-      if (done || !value) throw new Error(`${https ? 'HTTPS' : 'HTTP'} proxy closed before CONNECT response`);
+      if (done || !value)
+        throw new Error(`${https ? 'HTTPS' : 'HTTP'} proxy closed before CONNECT response`);
       responseBuffer = new Uint8Array([...responseBuffer, ...value]);
       bytesRead = responseBuffer.length;
       const crlfcrlf = responseBuffer.findIndex(
@@ -171,9 +209,9 @@ export async function httpConnect(
     if (headerEndIndex === -1) throw new Error('Proxy CONNECT response header too long or invalid');
     const statusMatch = decoder
       .decode(responseBuffer.slice(0, headerEndIndex))
-      .split('\r\n')[0]
+      .split('\r\n')[0]!
       .match(/HTTP\/\d\.\d\s+(\d+)/);
-    const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : NaN;
+    const statusCode = statusMatch ? parseInt(statusMatch[1]!, 10) : NaN;
     if (!Number.isFinite(statusCode) || statusCode < 200 || statusCode >= 300) {
       throw new Error(`Connection failed: HTTP ${statusCode}`);
     }
@@ -192,14 +230,31 @@ export async function httpConnect(
       await transformWriter.write(responseBuffer.subarray(headerEndIndex, bytesRead));
       transformWriter.releaseLock();
       socket.readable.pipeTo(writable).catch(() => {});
-      return { readable, writable: socket.writable, closed: socket.closed, close: () => socket.close() } as Socket;
+      return {
+        readable,
+        writable: socket.writable,
+        closed: socket.closed,
+        close: () => socket.close(),
+      } as Socket;
     }
 
     return socket;
   } catch (error) {
-    try { writer.releaseLock(); } catch { /* ignore */ }
-    try { reader.releaseLock(); } catch { /* ignore */ }
-    try { socket.close(); } catch { /* ignore */ }
+    try {
+      writer.releaseLock();
+    } catch {
+      /* ignore */
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore */
+    }
+    try {
+      void socket.close();
+    } catch {
+      /* ignore */
+    }
     throw error;
   }
 }
@@ -220,11 +275,19 @@ export async function httpsConnect(
     const proxySocket = connector.connect({ hostname, port });
     try {
       await proxySocket.opened;
-      const tlsClient = new TlsClient(proxySocket, { serverName: tlsServerName, insecure: true, allowChacha });
+      const tlsClient = new TlsClient(proxySocket, {
+        serverName: tlsServerName,
+        insecure: true,
+        allowChacha,
+      });
       await tlsClient.handshake();
       return tlsClient;
     } catch (error) {
-      try { proxySocket.close(); } catch { /* ignore */ }
+      try {
+        void proxySocket.close();
+      } catch {
+        /* ignore */
+      }
       throw error;
     }
   };
@@ -234,13 +297,19 @@ export async function httpsConnect(
     try {
       tlsSocket = await openTls(false);
     } catch (error) {
-      if (!/cipher|handshake|TLS Alert|ServerHello|Finished|Unsupported|Missing TLS/i.test((error as Error)?.message || `${error || ''}`)) throw error;
+      if (
+        !/cipher|handshake|TLS Alert|ServerHello|Finished|Unsupported|Missing TLS/i.test(
+          (error as Error)?.message || `${error || ''}`,
+        )
+      )
+        throw error;
       tlsSocket = await openTls(true);
     }
 
-    const auth = username && password
-      ? `Proxy-Authorization: Basic ${btoa(`${username}:${password}`)}\r\n`
-      : '';
+    const auth =
+      username && password
+        ? `Proxy-Authorization: Basic ${btoa(`${username}:${password}`)}\r\n`
+        : '';
     const request = `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\nHost: ${targetHost}:${targetPort}\r\n${auth}User-Agent: Mozilla/5.0\r\nConnection: keep-alive\r\n\r\n`;
     await tlsSocket.write(encoder.encode(request));
 
@@ -263,12 +332,13 @@ export async function httpsConnect(
       if (crlfcrlf !== -1) headerEndIndex = crlfcrlf + 4;
     }
 
-    if (headerEndIndex === -1) throw new Error('HTTPS proxy CONNECT response header too long or invalid');
+    if (headerEndIndex === -1)
+      throw new Error('HTTPS proxy CONNECT response header too long or invalid');
     const statusMatch = decoder
       .decode(responseBuffer.slice(0, headerEndIndex))
-      .split('\r\n')[0]
+      .split('\r\n')[0]!
       .match(/HTTP\/\d\.\d\s+(\d+)/);
-    const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : NaN;
+    const statusCode = statusMatch ? parseInt(statusMatch[1]!, 10) : NaN;
     if (!Number.isFinite(statusCode) || statusCode < 200 || statusCode >= 300) {
       throw new Error(`Connection failed: HTTP ${statusCode}`);
     }
@@ -277,7 +347,8 @@ export async function httpsConnect(
       await tlsSocket.write(initialData);
     }
 
-    const bufferedData = bytesRead > headerEndIndex ? responseBuffer.subarray(headerEndIndex, bytesRead) : null;
+    const bufferedData =
+      bytesRead > headerEndIndex ? responseBuffer.subarray(headerEndIndex, bytesRead) : null;
     let closedSettled = false;
     let resolveClosed: () => void;
     let rejectClosed: (err: unknown) => void;
@@ -292,7 +363,11 @@ export async function httpsConnect(
       rejectClosed = reject;
     });
     const close = () => {
-      try { tlsSocket?.close(); } catch { /* ignore */ }
+      try {
+        void tlsSocket?.close();
+      } catch {
+        /* ignore */
+      }
       settleClosed(resolveClosed!);
     };
 
@@ -305,10 +380,18 @@ export async function httpsConnect(
             if (!data) break;
             if (data.byteLength > 0) controller.enqueue(data);
           }
-          try { controller.close(); } catch { /* ignore */ }
+          try {
+            controller.close();
+          } catch {
+            /* ignore */
+          }
           settleClosed(resolveClosed!);
         } catch (error) {
-          try { controller.error(error); } catch { /* ignore */ }
+          try {
+            controller.error(error);
+          } catch {
+            /* ignore */
+          }
           settleClosed(rejectClosed!, error);
         }
       },
@@ -330,7 +413,11 @@ export async function httpsConnect(
 
     return { readable, writable, closed, close } as unknown as Socket;
   } catch (error) {
-    try { tlsSocket?.close(); } catch { /* ignore */ }
+    try {
+      void tlsSocket?.close();
+    } catch {
+      /* ignore */
+    }
     throw error;
   }
 }

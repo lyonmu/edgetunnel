@@ -1,24 +1,24 @@
+import { toOwnedUint8Array } from '../shared/bytes';
+
 export function readUint16(buffer: Uint8Array, offset: number): number {
-  return (buffer[offset] << 8) | buffer[offset + 1];
+  return (buffer[offset]! << 8) | buffer[offset + 1]!;
 }
 
 export function readUint24(buffer: Uint8Array, offset: number): number {
-  return (buffer[offset] << 16) | (buffer[offset + 1] << 8) | buffer[offset + 2];
+  return (buffer[offset]! << 16) | (buffer[offset + 1]! << 8) | buffer[offset + 2]!;
 }
 
 export class TlsRecordParser {
-  private buffer = new Uint8Array(0);
+  private buffer: Uint8Array = new Uint8Array(0);
 
   feed(chunk: Uint8Array): void {
     const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-    this.buffer = this.buffer.length
-      ? concatBytes(this.buffer, bytes)
-      : bytes;
+    this.buffer = this.buffer.length ? concatBytes(this.buffer, bytes) : bytes;
   }
 
   next(): { type: number; version: number; length: number; fragment: Uint8Array } | null {
     if (this.buffer.length < 5) return null;
-    const contentType = this.buffer[0];
+    const contentType = this.buffer[0]!;
     const version = readUint16(this.buffer, 1);
     const length = readUint16(this.buffer, 3);
     if (this.buffer.length < 5 + length) return null;
@@ -29,18 +29,16 @@ export class TlsRecordParser {
 }
 
 export class TlsHandshakeParser {
-  private buffer = new Uint8Array(0);
+  private buffer: Uint8Array = new Uint8Array(0);
 
   feed(chunk: Uint8Array): void {
     const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-    this.buffer = this.buffer.length
-      ? concatBytes(this.buffer, bytes)
-      : bytes;
+    this.buffer = this.buffer.length ? concatBytes(this.buffer, bytes) : bytes;
   }
 
   next(): { type: number; length: number; body: Uint8Array; raw: Uint8Array } | null {
     if (this.buffer.length < 4) return null;
-    const handshakeType = this.buffer[0];
+    const handshakeType = this.buffer[0]!;
     const length = readUint24(this.buffer, 1);
     if (this.buffer.length < 4 + length) return null;
     const body = this.buffer.subarray(4, 4 + length);
@@ -53,7 +51,7 @@ export class TlsHandshakeParser {
 export function concatBytes(...chunks: (Uint8Array | null | undefined)[]): Uint8Array {
   const nonEmpty = chunks.filter((c): c is Uint8Array => !!c && c.length > 0);
   if (nonEmpty.length === 0) return new Uint8Array(0);
-  if (nonEmpty.length === 1) return nonEmpty[0];
+  if (nonEmpty.length === 1) return nonEmpty[0]!;
   const length = nonEmpty.reduce((s, c) => s + c.length, 0);
   const result = new Uint8Array(length);
   let offset = 0;
@@ -71,7 +69,7 @@ export function randomBytes(length: number): Uint8Array {
 export function constantTimeEqual(left: Uint8Array, right: Uint8Array): boolean {
   if (!left || !right || left.length !== right.length) return false;
   let diff = 0;
-  for (let i = 0; i < left.length; i++) diff |= left[i] ^ right[i];
+  for (let i = 0; i < left.length; i++) diff |= left[i]! ^ right[i]!;
   return diff === 0;
 }
 
@@ -82,12 +80,18 @@ export function hashByteLength(hash: string): number {
 }
 
 export async function hmac(hash: string, key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  const cryptoKey = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash }, false, ['sign']);
-  return new Uint8Array(await crypto.subtle.sign('HMAC', cryptoKey, data));
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    toOwnedUint8Array(key),
+    { name: 'HMAC', hash },
+    false,
+    ['sign'],
+  );
+  return new Uint8Array(await crypto.subtle.sign('HMAC', cryptoKey, toOwnedUint8Array(data)));
 }
 
 export async function digestBytes(hash: string, data: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest(hash, data));
+  return new Uint8Array(await crypto.subtle.digest(hash, toOwnedUint8Array(data)));
 }
 
 export async function tls12Prf(
@@ -99,8 +103,8 @@ export async function tls12Prf(
 ): Promise<Uint8Array> {
   const textEncoder = new TextEncoder();
   const labelSeed = concatBytes(textEncoder.encode(label), seed);
-  let output = new Uint8Array(0);
-  let currentA = labelSeed;
+  let output: Uint8Array = new Uint8Array(0);
+  let currentA: Uint8Array = labelSeed;
   while (output.length < length) {
     currentA = await hmac(hash, secret, currentA);
     const block = await hmac(hash, secret, concatBytes(currentA, labelSeed));
@@ -109,7 +113,11 @@ export async function tls12Prf(
   return output.slice(0, length);
 }
 
-export async function hkdfExtract(hash: string, salt: Uint8Array | null, inputKeyMaterial: Uint8Array): Promise<Uint8Array> {
+export async function hkdfExtract(
+  hash: string,
+  salt: Uint8Array | null,
+  inputKeyMaterial: Uint8Array,
+): Promise<Uint8Array> {
   if (!salt || !salt.length) salt = new Uint8Array(hashByteLength(hash));
   return hmac(hash, salt, inputKeyMaterial);
 }
@@ -123,18 +131,12 @@ export async function hkdfExpandLabel(
 ): Promise<Uint8Array> {
   const textEncoder = new TextEncoder();
   const fullLabel = textEncoder.encode('tls13 ' + label);
-  const info = tlsBytes(
-    uint16be(length),
-    fullLabel.length,
-    fullLabel,
-    context.length,
-    context,
-  );
+  const info = tlsBytes(uint16be(length), fullLabel.length, fullLabel, context.length, context);
 
   const hashLen = hashByteLength(hash);
   const roundCount = Math.ceil(length / hashLen);
-  let output = new Uint8Array(0);
-  let previousBlock = new Uint8Array(0);
+  let output: Uint8Array = new Uint8Array(0);
+  let previousBlock: Uint8Array = new Uint8Array(0);
   for (let round = 1; round <= roundCount; round++) {
     previousBlock = await hmac(
       hash,
@@ -213,12 +215,18 @@ export const GROUPS_BY_ID = new Map([
   [23, 'P-256'],
 ]);
 
-export const SUPPORTED_SIGNATURE_ALGORITHMS = [2052, 2053, 2054, 1025, 1281, 1537, 1027, 1283, 1539];
+export const SUPPORTED_SIGNATURE_ALGORITHMS = [
+  2052, 2053, 2054, 1025, 1281, 1537, 1027, 1283, 1539,
+];
 
 const shouldIgnoreTlsAlert = (fragment: Uint8Array): boolean =>
   fragment?.[0] === ALERT_LEVEL_WARNING && fragment?.[1] === ALERT_UNRECOGNIZED_NAME;
 
-export function buildTlsRecord(contentType: number, fragment: Uint8Array, version = TLS_VERSION_10): Uint8Array {
+export function buildTlsRecord(
+  contentType: number,
+  fragment: Uint8Array,
+  version = TLS_VERSION_10,
+): Uint8Array {
   const header = new Uint8Array(5);
   header[0] = contentType;
   header[1] = (version >> 8) & 0xff;
@@ -256,12 +264,12 @@ export function parseServerHello(body: Uint8Array): ServerHello {
   offset += 2;
   const serverRandom = body.slice(offset, offset + 32);
   offset += 32;
-  const sessionIdLength = body[offset++];
+  const sessionIdLength = body[offset++]!;
   const sessionId = body.slice(offset, offset + sessionIdLength);
   offset += sessionIdLength;
   const cipherSuite = readUint16(body, offset);
   offset += 2;
-  const compression = body[offset++];
+  const compression = body[offset++]!;
 
   let selectedVersion = legacyVersion;
   let keyShare: { group: number; key: Uint8Array } | null = null;
@@ -289,14 +297,14 @@ export function parseServerHello(body: Uint8Array): ServerHello {
         extensionType === EXT_APPLICATION_LAYER_PROTOCOL_NEGOTIATION &&
         extensionLength >= 3
       ) {
-        alpn = new TextDecoder().decode(extensionData.slice(3, 3 + extensionData[2]));
+        alpn = new TextDecoder().decode(extensionData.slice(3, 3 + extensionData[2]!));
       }
     }
   }
 
   const helloRetryRequestRandom = new Uint8Array([
-    207, 33, 173, 116, 229, 154, 97, 17, 190, 29, 140, 2, 30, 101, 184, 145,
-    194, 162, 17, 22, 122, 187, 140, 94, 7, 158, 9, 226, 200, 168, 51, 156,
+    207, 33, 173, 116, 229, 154, 97, 17, 190, 29, 140, 2, 30, 101, 184, 145, 194, 162, 17, 22, 122,
+    187, 140, 94, 7, 158, 9, 226, 200, 168, 51, 156,
   ]);
 
   return {
@@ -313,18 +321,21 @@ export function parseServerHello(body: Uint8Array): ServerHello {
   };
 }
 
-export function parseServerKeyExchange(body: Uint8Array): { namedCurve: number; serverPublicKey: Uint8Array } {
+export function parseServerKeyExchange(body: Uint8Array): {
+  namedCurve: number;
+  serverPublicKey: Uint8Array;
+} {
   let offset = 1;
   const namedCurve = readUint16(body, offset);
   offset += 2;
-  const keyLength = body[offset++];
+  const keyLength = body[offset++]!;
   return { namedCurve, serverPublicKey: body.slice(offset, offset + keyLength) };
 }
 
 export function extractLeafCertificate(body: Uint8Array, hasContext = 0): Uint8Array | null {
   let offset = 0;
   if (hasContext) {
-    const contextLength = body[offset++];
+    const contextLength = body[offset++]!;
     offset += contextLength;
   }
   if (offset + 3 > body.length) return null;
@@ -345,11 +356,8 @@ export function parseEncryptedExtensions(body: Uint8Array): { alpn: string | nul
     offset += 2;
     const extensionLength = readUint16(body, offset);
     offset += 2;
-    if (
-      extensionType === EXT_APPLICATION_LAYER_PROTOCOL_NEGOTIATION &&
-      extensionLength >= 3
-    ) {
-      const protocolLength = body[offset + 2];
+    if (extensionType === EXT_APPLICATION_LAYER_PROTOCOL_NEGOTIATION && extensionLength >= 3) {
+      const protocolLength = body[offset + 2]!;
       if (protocolLength > 0 && offset + 3 + protocolLength <= offset + extensionLength) {
         parsed.alpn = new TextDecoder().decode(body.slice(offset + 3, offset + 3 + protocolLength));
       }
@@ -361,7 +369,9 @@ export function parseEncryptedExtensions(body: Uint8Array): { alpn: string | nul
 
 export async function generateKeyShare(group = 'P-256') {
   const algorithm = group === 'X25519' ? { name: 'X25519' } : { name: 'ECDH', namedCurve: group };
-  const keyPair = (await crypto.subtle.generateKey(algorithm, true, ['deriveBits'])) as CryptoKeyPair;
+  const keyPair = (await crypto.subtle.generateKey(algorithm, true, [
+    'deriveBits',
+  ])) as CryptoKeyPair;
   const publicKeyRaw = new Uint8Array(await crypto.subtle.exportKey('raw', keyPair.publicKey));
   return { keyPair, publicKeyRaw };
 }
@@ -372,19 +382,21 @@ export async function deriveSharedSecret(
   group = 'P-256',
 ): Promise<Uint8Array> {
   const algorithm = group === 'X25519' ? { name: 'X25519' } : { name: 'ECDH', namedCurve: group };
-  const peerKey = await crypto.subtle.importKey('raw', peerPublicKey, algorithm, false, []);
+  const peerKey = await crypto.subtle.importKey(
+    'raw',
+    toOwnedUint8Array(peerPublicKey),
+    algorithm,
+    false,
+    [],
+  );
   const bits = group === 'P-384' ? 384 : group === 'P-521' ? 528 : 256;
   return new Uint8Array(
-    await crypto.subtle.deriveBits(
-      { name: algorithm.name, public: peerKey } as any,
-      privateKey,
-      bits,
-    ),
+    await crypto.subtle.deriveBits({ name: algorithm.name, public: peerKey }, privateKey, bits),
   );
 }
 
 export async function importAesGcmKey(key: Uint8Array, usages: KeyUsage[]): Promise<CryptoKey> {
-  return crypto.subtle.importKey('raw', key, { name: 'AES-GCM' }, false, usages);
+  return crypto.subtle.importKey('raw', toOwnedUint8Array(key), { name: 'AES-GCM' }, false, usages);
 }
 
 export async function aesGcmEncryptWithKey(
@@ -395,9 +407,14 @@ export async function aesGcmEncryptWithKey(
 ): Promise<Uint8Array> {
   return new Uint8Array(
     await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv, additionalData, tagLength: 128 },
+      {
+        name: 'AES-GCM',
+        iv: toOwnedUint8Array(iv),
+        additionalData: toOwnedUint8Array(additionalData),
+        tagLength: 128,
+      },
       cryptoKey,
-      plaintext,
+      toOwnedUint8Array(plaintext),
     ),
   );
 }
@@ -410,9 +427,14 @@ export async function aesGcmDecryptWithKey(
 ): Promise<Uint8Array> {
   return new Uint8Array(
     await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv, additionalData, tagLength: 128 },
+      {
+        name: 'AES-GCM',
+        iv: toOwnedUint8Array(iv),
+        additionalData: toOwnedUint8Array(additionalData),
+        tagLength: 128,
+      },
       cryptoKey,
-      ciphertext,
+      toOwnedUint8Array(ciphertext),
     ),
   );
 }
@@ -423,10 +445,16 @@ export function uint64be(sequenceNumber: bigint): Uint8Array {
   return bytes;
 }
 
-export function xorSequenceIntoIv(initializationVector: Uint8Array, sequenceNumber: bigint): Uint8Array {
+export function xorSequenceIntoIv(
+  initializationVector: Uint8Array,
+  sequenceNumber: bigint,
+): Uint8Array {
   const nonce = initializationVector.slice();
   const sequenceBytes = uint64be(sequenceNumber);
-  for (let i = 0; i < 8; i++) nonce[nonce.length - 8 + i] ^= sequenceBytes[i];
+  for (let i = 0; i < 8; i++) {
+    const index = nonce.length - 8 + i;
+    nonce[index] = nonce[index]! ^ sequenceBytes[i]!;
+  }
   return nonce;
 }
 
@@ -446,9 +474,19 @@ export function buildClientHello(
   clientRandom: Uint8Array,
   serverName: string,
   keyShares: { x25519?: Uint8Array; p256?: Uint8Array } | Uint8Array,
-  options: { tls13?: boolean; tls12?: boolean; alpn?: string[] | string | null; chacha?: boolean } = {},
+  options: {
+    tls13?: boolean;
+    tls12?: boolean;
+    alpn?: string[] | string | null;
+    chacha?: boolean;
+  } = {},
 ): Uint8Array {
-  const { tls13: enableTls13 = true, tls12: enableTls12 = true, alpn = null, chacha = true } = options;
+  const {
+    tls13: enableTls13 = true,
+    tls12: enableTls12 = true,
+    alpn = null,
+    chacha = true,
+  } = options;
   const textEncoder = new TextEncoder();
 
   const cipherIds: number[] = [];
@@ -607,21 +645,29 @@ export class TlsClient {
   ecdhKeyPair: CryptoKeyPair | null;
   sawCert: boolean;
 
-  constructor(socket: Socket, options: {
-    serverName?: string;
-    tls13?: boolean;
-    tls12?: boolean;
-    alpn?: string[] | string | null;
-    allowChacha?: boolean;
-    timeout?: number;
-    insecure?: boolean;
-  } = {}) {
+  constructor(
+    socket: Socket,
+    options: {
+      serverName?: string;
+      tls13?: boolean;
+      tls12?: boolean;
+      alpn?: string[] | string | null;
+      allowChacha?: boolean;
+      timeout?: number;
+      insecure?: boolean;
+    } = {},
+  ) {
     this.socket = socket;
     this.serverName = options.serverName || '';
     this.supportTls13 = options.tls13 !== false;
     this.supportTls12 = options.tls12 !== false;
-    if (!this.supportTls13 && !this.supportTls12) throw new Error('At least one TLS version must be enabled');
-    this.alpnProtocols = Array.isArray(options.alpn) ? options.alpn : options.alpn ? [options.alpn] : null;
+    if (!this.supportTls13 && !this.supportTls12)
+      throw new Error('At least one TLS version must be enabled');
+    this.alpnProtocols = Array.isArray(options.alpn)
+      ? options.alpn
+      : options.alpn
+        ? [options.alpn]
+        : null;
     this.allowChacha = options.allowChacha !== false;
     this.timeout = options.timeout ?? 30000;
     this.clientRandom = randomBytes(32);
@@ -667,7 +713,7 @@ export class TlsClient {
 
   transcript(): Uint8Array {
     return this.handshakeChunks.length === 1
-      ? this.handshakeChunks[0]
+      ? this.handshakeChunks[0]!
       : concatBytes(...this.handshakeChunks);
   }
 
@@ -675,11 +721,13 @@ export class TlsClient {
     return CIPHER_SUITES_BY_ID.get(cipherSuite) ?? null;
   }
 
-  async readChunk(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<ReadableStreamReadResult<Uint8Array>> {
+  async readChunk(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+  ): Promise<ReadableStreamReadResult<Uint8Array>> {
     if (this.timeout) {
       return Promise.race([
         reader.read(),
-        new Promise<never>((_, reject) =>
+        new Promise<never>((_resolve, reject) =>
           setTimeout(() => reject(new Error('TLS read timeout')), this.timeout),
         ),
       ]);
@@ -689,7 +737,12 @@ export class TlsClient {
 
   async readRecordsUntil(
     reader: ReadableStreamDefaultReader<Uint8Array>,
-    predicate: (record: { type: number; version: number; length: number; fragment: Uint8Array }) => Promise<boolean | void>,
+    predicate: (record: {
+      type: number;
+      version: number;
+      length: number;
+      fragment: Uint8Array;
+    }) => Promise<boolean | void>,
     closedError: string,
   ): Promise<void> {
     for (;;) {
@@ -705,7 +758,12 @@ export class TlsClient {
 
   async readHandshakeUntil(
     reader: ReadableStreamDefaultReader<Uint8Array>,
-    predicate: (message: { type: number; length: number; body: Uint8Array; raw: Uint8Array }) => Promise<boolean | void>,
+    predicate: (message: {
+      type: number;
+      length: number;
+      body: Uint8Array;
+      raw: Uint8Array;
+    }) => Promise<boolean | void>,
     closedError: string,
   ): Promise<void> {
     let message;
@@ -754,7 +812,12 @@ export class TlsClient {
         this.clientRandom,
         this.serverName,
         { x25519: x25519Share.publicKeyRaw, p256: p256Share.publicKeyRaw },
-        { tls13: this.supportTls13, tls12: this.supportTls12, alpn: this.alpnProtocols, chacha: this.allowChacha },
+        {
+          tls13: this.supportTls13,
+          tls12: this.supportTls12,
+          alpn: this.alpnProtocols,
+          chacha: this.allowChacha,
+        },
       );
       this.recordHandshake(clientHello);
       await writer.write(buildTlsRecord(CONTENT_TYPE_HANDSHAKE, clientHello, TLS_VERSION_10));
@@ -779,9 +842,7 @@ export class TlsClient {
     }
   }
 
-  async receiveServerHello(
-    reader: ReadableStreamDefaultReader<Uint8Array>,
-  ): Promise<ServerHello> {
+  async receiveServerHello(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<ServerHello> {
     for (;;) {
       const { value, done } = await this.readChunk(reader);
       if (done) throw new Error('Connection closed waiting for ServerHello');
@@ -804,7 +865,8 @@ export class TlsClient {
           this.cipherConfig = this.getCipherConfig(serverHello.cipherSuite);
           this.isTls13 = serverHello.isTls13;
           this.negotiatedAlpn = serverHello.alpn || null;
-          if (!this.cipherConfig) throw new Error(`Unsupported cipher suite: 0x${serverHello.cipherSuite.toString(16)}`);
+          if (!this.cipherConfig)
+            throw new Error(`Unsupported cipher suite: 0x${serverHello.cipherSuite.toString(16)}`);
           return serverHello;
         }
       }
@@ -816,7 +878,6 @@ export class TlsClient {
     writer: WritableStreamDefaultWriter<Uint8Array>,
   ): Promise<void> {
     let serverKeyExchange: { namedCurve: number; serverPublicKey: Uint8Array } | null = null;
-    let sawServerHelloDone = false;
 
     await this.readHandshakeUntil(
       reader,
@@ -835,7 +896,6 @@ export class TlsClient {
             break;
           case HANDSHAKE_TYPE_SERVER_HELLO_DONE:
             this.recordHandshake(message.raw);
-            sawServerHelloDone = true;
             return true;
           default:
             this.recordHandshake(message.raw);
@@ -845,17 +905,28 @@ export class TlsClient {
     );
 
     if (!this.sawCert) throw new Error('Missing TLS 1.2 leaf certificate');
-    if (!serverKeyExchange) throw new Error('Missing TLS 1.2 ServerKeyExchange');
+    const resolvedServerKeyExchange = serverKeyExchange as ReturnType<
+      typeof parseServerKeyExchange
+    > | null;
+    if (!resolvedServerKeyExchange) throw new Error('Missing TLS 1.2 ServerKeyExchange');
 
-    const curveName = GROUPS_BY_ID.get(serverKeyExchange.namedCurve);
-    if (!curveName) throw new Error(`Unsupported named curve: 0x${serverKeyExchange.namedCurve.toString(16)}`);
+    const curveName = GROUPS_BY_ID.get(resolvedServerKeyExchange.namedCurve);
+    if (!curveName) {
+      throw new Error(
+        `Unsupported named curve: 0x${resolvedServerKeyExchange.namedCurve.toString(16)}`,
+      );
+    }
 
-    const keyShare = this.keyPairs.get(serverKeyExchange.namedCurve);
-    if (!keyShare) throw new Error(`Missing key pair for curve: 0x${serverKeyExchange.namedCurve.toString(16)}`);
+    const keyShare = this.keyPairs.get(resolvedServerKeyExchange.namedCurve);
+    if (!keyShare) {
+      throw new Error(
+        `Missing key pair for curve: 0x${resolvedServerKeyExchange.namedCurve.toString(16)}`,
+      );
+    }
 
     const preMasterSecret = await deriveSharedSecret(
       keyShare.keyPair.privateKey,
-      serverKeyExchange.serverPublicKey,
+      resolvedServerKeyExchange.serverPublicKey,
       curveName,
     );
 
@@ -869,7 +940,7 @@ export class TlsClient {
     this.masterSecret = await tls12Prf(
       preMasterSecret,
       'master secret',
-      concatBytes(this.clientRandom, this.serverRandom!),
+      concatBytes(this.clientRandom, this.serverRandom),
       48,
       hashName,
     );
@@ -879,7 +950,7 @@ export class TlsClient {
     const keyBlock = await tls12Prf(
       this.masterSecret,
       'key expansion',
-      concatBytes(this.serverRandom!, this.clientRandom),
+      concatBytes(this.serverRandom, this.clientRandom),
       2 * keyLen + 2 * ivLen,
       hashName,
     );
@@ -909,7 +980,10 @@ export class TlsClient {
     const finishedMessage = buildHandshakeMessage(HANDSHAKE_TYPE_FINISHED, clientVerifyData);
     this.recordHandshake(finishedMessage);
     await writer.write(
-      buildTlsRecord(CONTENT_TYPE_HANDSHAKE, await this.encryptTls12(finishedMessage, CONTENT_TYPE_HANDSHAKE)),
+      buildTlsRecord(
+        CONTENT_TYPE_HANDSHAKE,
+        await this.encryptTls12(finishedMessage, CONTENT_TYPE_HANDSHAKE),
+      ),
     );
 
     let sawChangeCipherSpec = false;
@@ -951,36 +1025,79 @@ export class TlsClient {
     serverHello: ServerHello,
   ): Promise<void> {
     const groupName = GROUPS_BY_ID.get(serverHello.keyShare?.group ?? 0);
-    if (!groupName || !serverHello.keyShare?.key?.length) throw new Error('Missing TLS 1.3 key_share');
+    if (!groupName || !serverHello.keyShare?.key?.length)
+      throw new Error('Missing TLS 1.3 key_share');
 
     const hashName = this.cipherConfig!.hash;
     const hashLen = hashByteLength(hashName);
     const keyLen = this.cipherConfig!.keyLen;
     const ivLen = this.cipherConfig!.ivLen;
 
-    const sharedSecret = await deriveSharedSecret(this.ecdhKeyPair!.privateKey, serverHello.keyShare.key, groupName);
+    const sharedSecret = await deriveSharedSecret(
+      this.ecdhKeyPair!.privateKey,
+      serverHello.keyShare.key,
+      groupName,
+    );
     const earlySecret = await hkdfExtract(hashName, null, new Uint8Array(hashLen));
-    const derivedSecret = await hkdfExpandLabel(hashName, earlySecret, 'derived', await digestBytes(hashName, EMPTY_BYTES), hashLen);
+    const derivedSecret = await hkdfExpandLabel(
+      hashName,
+      earlySecret,
+      'derived',
+      await digestBytes(hashName, EMPTY_BYTES),
+      hashLen,
+    );
     this.handshakeSecret = await hkdfExtract(hashName, derivedSecret, sharedSecret);
 
     const transcriptHash = await digestBytes(hashName, this.transcript());
-    const clientHandshakeTrafficSecret = await hkdfExpandLabel(hashName, this.handshakeSecret, 'c hs traffic', transcriptHash, hashLen);
-    const serverHandshakeTrafficSecret = await hkdfExpandLabel(hashName, this.handshakeSecret, 's hs traffic', transcriptHash, hashLen);
+    const clientHandshakeTrafficSecret = await hkdfExpandLabel(
+      hashName,
+      this.handshakeSecret,
+      'c hs traffic',
+      transcriptHash,
+      hashLen,
+    );
+    const serverHandshakeTrafficSecret = await hkdfExpandLabel(
+      hashName,
+      this.handshakeSecret,
+      's hs traffic',
+      transcriptHash,
+      hashLen,
+    );
 
-    [this.clientHandshakeKey, this.clientHandshakeIv] = await deriveTrafficKeys(hashName, clientHandshakeTrafficSecret, keyLen, ivLen);
-    [this.serverHandshakeKey, this.serverHandshakeIv] = await deriveTrafficKeys(hashName, serverHandshakeTrafficSecret, keyLen, ivLen);
+    [this.clientHandshakeKey, this.clientHandshakeIv] = await deriveTrafficKeys(
+      hashName,
+      clientHandshakeTrafficSecret,
+      keyLen,
+      ivLen,
+    );
+    [this.serverHandshakeKey, this.serverHandshakeIv] = await deriveTrafficKeys(
+      hashName,
+      serverHandshakeTrafficSecret,
+      keyLen,
+      ivLen,
+    );
 
     if (!this.cipherConfig!.chacha) {
       [this.clientHandshakeCryptoKey, this.serverHandshakeCryptoKey] = await Promise.all([
-        importAesGcmKey(this.clientHandshakeKey!, ['encrypt']),
-        importAesGcmKey(this.serverHandshakeKey!, ['decrypt']),
+        importAesGcmKey(this.clientHandshakeKey, ['encrypt']),
+        importAesGcmKey(this.serverHandshakeKey, ['decrypt']),
       ]);
     }
 
-    const serverFinishedKey = await hkdfExpandLabel(hashName, serverHandshakeTrafficSecret, 'finished', EMPTY_BYTES, hashLen);
+    const serverFinishedKey = await hkdfExpandLabel(
+      hashName,
+      serverHandshakeTrafficSecret,
+      'finished',
+      EMPTY_BYTES,
+      hashLen,
+    );
     let serverFinishedReceived = false;
 
-    const handleHandshakeMessage = async (message: { type: number; body: Uint8Array; raw: Uint8Array }) => {
+    const handleHandshakeMessage = async (message: {
+      type: number;
+      body: Uint8Array;
+      raw: Uint8Array;
+    }) => {
       switch (message.type) {
         case HANDSHAKE_TYPE_ENCRYPTED_EXTENSIONS: {
           const encryptedExtensions = parseEncryptedExtensions(message.body);
@@ -996,8 +1113,13 @@ export class TlsClient {
           break;
         }
         case HANDSHAKE_TYPE_FINISHED: {
-          const expectedVerifyData = await hmac(hashName, serverFinishedKey, await digestBytes(hashName, this.transcript()));
-          if (!constantTimeEqual(expectedVerifyData, message.body)) throw new Error('TLS 1.3 server Finished verify failed');
+          const expectedVerifyData = await hmac(
+            hashName,
+            serverFinishedKey,
+            await digestBytes(hashName, this.transcript()),
+          );
+          if (!constantTimeEqual(expectedVerifyData, message.body))
+            throw new Error('TLS 1.3 server Finished verify failed');
           this.recordHandshake(message.raw);
           serverFinishedReceived = true;
           break;
@@ -1010,7 +1132,11 @@ export class TlsClient {
     await this.readRecordsUntil(
       reader,
       async (record) => {
-        if (record.type === CONTENT_TYPE_CHANGE_CIPHER_SPEC || record.type === CONTENT_TYPE_HANDSHAKE) return;
+        if (
+          record.type === CONTENT_TYPE_CHANGE_CIPHER_SPEC ||
+          record.type === CONTENT_TYPE_HANDSHAKE
+        )
+          return;
         if (record.type === CONTENT_TYPE_ALERT) {
           if (shouldIgnoreTlsAlert(record.fragment)) return;
           throw new Error(`TLS Alert: ${record.fragment[1]}`);
@@ -1032,29 +1158,72 @@ export class TlsClient {
     );
 
     const applicationTranscriptHash = await digestBytes(hashName, this.transcript());
-    const masterDerivedSecret = await hkdfExpandLabel(hashName, this.handshakeSecret!, 'derived', await digestBytes(hashName, EMPTY_BYTES), hashLen);
+    const masterDerivedSecret = await hkdfExpandLabel(
+      hashName,
+      this.handshakeSecret,
+      'derived',
+      await digestBytes(hashName, EMPTY_BYTES),
+      hashLen,
+    );
     const masterSecret = await hkdfExtract(hashName, masterDerivedSecret, new Uint8Array(hashLen));
-    const clientAppTrafficSecret = await hkdfExpandLabel(hashName, masterSecret, 'c ap traffic', applicationTranscriptHash, hashLen);
-    const serverAppTrafficSecret = await hkdfExpandLabel(hashName, masterSecret, 's ap traffic', applicationTranscriptHash, hashLen);
+    const clientAppTrafficSecret = await hkdfExpandLabel(
+      hashName,
+      masterSecret,
+      'c ap traffic',
+      applicationTranscriptHash,
+      hashLen,
+    );
+    const serverAppTrafficSecret = await hkdfExpandLabel(
+      hashName,
+      masterSecret,
+      's ap traffic',
+      applicationTranscriptHash,
+      hashLen,
+    );
 
-    [this.clientAppKey, this.clientAppIv] = await deriveTrafficKeys(hashName, clientAppTrafficSecret, keyLen, ivLen);
-    [this.serverAppKey, this.serverAppIv] = await deriveTrafficKeys(hashName, serverAppTrafficSecret, keyLen, ivLen);
+    [this.clientAppKey, this.clientAppIv] = await deriveTrafficKeys(
+      hashName,
+      clientAppTrafficSecret,
+      keyLen,
+      ivLen,
+    );
+    [this.serverAppKey, this.serverAppIv] = await deriveTrafficKeys(
+      hashName,
+      serverAppTrafficSecret,
+      keyLen,
+      ivLen,
+    );
 
     if (!this.cipherConfig!.chacha) {
       [this.clientAppCryptoKey, this.serverAppCryptoKey] = await Promise.all([
-        importAesGcmKey(this.clientAppKey!, ['encrypt']),
-        importAesGcmKey(this.serverAppKey!, ['decrypt']),
+        importAesGcmKey(this.clientAppKey, ['encrypt']),
+        importAesGcmKey(this.serverAppKey, ['decrypt']),
       ]);
     }
 
-    const clientFinishedKey = await hkdfExpandLabel(hashName, clientHandshakeTrafficSecret, 'finished', EMPTY_BYTES, hashLen);
-    const clientFinishedVerifyData = await hmac(hashName, clientFinishedKey, await digestBytes(hashName, this.transcript()));
-    const clientFinishedMessage = buildHandshakeMessage(HANDSHAKE_TYPE_FINISHED, clientFinishedVerifyData);
+    const clientFinishedKey = await hkdfExpandLabel(
+      hashName,
+      clientHandshakeTrafficSecret,
+      'finished',
+      EMPTY_BYTES,
+      hashLen,
+    );
+    const clientFinishedVerifyData = await hmac(
+      hashName,
+      clientFinishedKey,
+      await digestBytes(hashName, this.transcript()),
+    );
+    const clientFinishedMessage = buildHandshakeMessage(
+      HANDSHAKE_TYPE_FINISHED,
+      clientFinishedVerifyData,
+    );
     this.recordHandshake(clientFinishedMessage);
     await writer.write(
       buildTlsRecord(
         CONTENT_TYPE_APPLICATION_DATA,
-        await this.encryptTls13Handshake(concatBytes(clientFinishedMessage, new Uint8Array([CONTENT_TYPE_HANDSHAKE]))),
+        await this.encryptTls13Handshake(
+          concatBytes(clientFinishedMessage, new Uint8Array([CONTENT_TYPE_HANDSHAKE])),
+        ),
       ),
     );
     this.clientSeqNum = 0n;
@@ -1067,18 +1236,24 @@ export class TlsClient {
     const additionalData = concatBytes(
       sequenceBytes,
       new Uint8Array([contentType]),
-      uint16be(TLS_VERSION_12),
-      uint16be(plaintext.length),
+      new Uint8Array(uint16be(TLS_VERSION_12)),
+      new Uint8Array(uint16be(plaintext.length)),
     );
     if (this.cipherConfig!.chacha) {
       const nonce = xorSequenceIntoIv(this.clientWriteIv!, sequenceNumber);
       return chacha20Poly1305Encrypt(this.clientWriteKey!, nonce, plaintext, additionalData);
     }
     const explicitNonce = randomBytes(8);
-    if (!this.clientWriteCryptoKey) this.clientWriteCryptoKey = await importAesGcmKey(this.clientWriteKey!, ['encrypt']);
+    if (!this.clientWriteCryptoKey)
+      this.clientWriteCryptoKey = await importAesGcmKey(this.clientWriteKey!, ['encrypt']);
     return concatBytes(
       explicitNonce,
-      await aesGcmEncryptWithKey(this.clientWriteCryptoKey, concatBytes(this.clientWriteIv!, explicitNonce), plaintext, additionalData),
+      await aesGcmEncryptWithKey(
+        this.clientWriteCryptoKey,
+        concatBytes(this.clientWriteIv, explicitNonce),
+        plaintext,
+        additionalData,
+      ),
     );
   }
 
@@ -1091,35 +1266,61 @@ export class TlsClient {
         this.serverWriteKey!,
         nonce,
         ciphertext,
-        concatBytes(sequenceBytes, new Uint8Array([contentType]), uint16be(TLS_VERSION_12), uint16be(ciphertext.length - 16)),
+        concatBytes(
+          sequenceBytes,
+          new Uint8Array([contentType]),
+          new Uint8Array(uint16be(TLS_VERSION_12)),
+          new Uint8Array(uint16be(ciphertext.length - 16)),
+        ),
       );
     }
     const explicitNonce = ciphertext.subarray(0, 8);
     const encryptedData = ciphertext.subarray(8);
-    if (!this.serverWriteCryptoKey) this.serverWriteCryptoKey = await importAesGcmKey(this.serverWriteKey!, ['decrypt']);
+    if (!this.serverWriteCryptoKey)
+      this.serverWriteCryptoKey = await importAesGcmKey(this.serverWriteKey!, ['decrypt']);
     return aesGcmDecryptWithKey(
       this.serverWriteCryptoKey,
-      concatBytes(this.serverWriteIv!, explicitNonce),
+      concatBytes(this.serverWriteIv, explicitNonce),
       encryptedData,
-      concatBytes(sequenceBytes, new Uint8Array([contentType]), uint16be(TLS_VERSION_12), uint16be(encryptedData.length - 16)),
+      concatBytes(
+        sequenceBytes,
+        new Uint8Array([contentType]),
+        new Uint8Array(uint16be(TLS_VERSION_12)),
+        new Uint8Array(uint16be(encryptedData.length - 16)),
+      ),
     );
   }
 
   async encryptTls13Handshake(plaintext: Uint8Array): Promise<Uint8Array> {
     const nonce = xorSequenceIntoIv(this.clientHandshakeIv!, this.clientSeqNum++);
-    const additionalData = tlsBytes(CONTENT_TYPE_APPLICATION_DATA, 3, 3, uint16be(plaintext.length + 16));
-    if (this.cipherConfig!.chacha) return chacha20Poly1305Encrypt(this.clientHandshakeKey!, nonce, plaintext, additionalData);
-    if (!this.clientHandshakeCryptoKey) this.clientHandshakeCryptoKey = await importAesGcmKey(this.clientHandshakeKey!, ['encrypt']);
+    const additionalData = tlsBytes(
+      CONTENT_TYPE_APPLICATION_DATA,
+      3,
+      3,
+      uint16be(plaintext.length + 16),
+    );
+    if (this.cipherConfig!.chacha)
+      return chacha20Poly1305Encrypt(this.clientHandshakeKey!, nonce, plaintext, additionalData);
+    if (!this.clientHandshakeCryptoKey)
+      this.clientHandshakeCryptoKey = await importAesGcmKey(this.clientHandshakeKey!, ['encrypt']);
     return aesGcmEncryptWithKey(this.clientHandshakeCryptoKey, nonce, plaintext, additionalData);
   }
 
   async decryptTls13Handshake(ciphertext: Uint8Array): Promise<Uint8Array> {
     const nonce = xorSequenceIntoIv(this.serverHandshakeIv!, this.serverSeqNum++);
-    const additionalData = tlsBytes(CONTENT_TYPE_APPLICATION_DATA, 3, 3, uint16be(ciphertext.length));
+    const additionalData = tlsBytes(
+      CONTENT_TYPE_APPLICATION_DATA,
+      3,
+      3,
+      uint16be(ciphertext.length),
+    );
     const decrypted = this.cipherConfig!.chacha
       ? await chacha20Poly1305Decrypt(this.serverHandshakeKey!, nonce, ciphertext, additionalData)
       : await aesGcmDecryptWithKey(
-          this.serverHandshakeCryptoKey || (this.serverHandshakeCryptoKey = await importAesGcmKey(this.serverHandshakeKey!, ['decrypt'])),
+          this.serverHandshakeCryptoKey ||
+            (this.serverHandshakeCryptoKey = await importAesGcmKey(this.serverHandshakeKey!, [
+              'decrypt',
+            ])),
           nonce,
           ciphertext,
           additionalData,
@@ -1132,19 +1333,32 @@ export class TlsClient {
   async encryptTls13(data: Uint8Array): Promise<Uint8Array> {
     const plaintext = concatBytes(data, new Uint8Array([CONTENT_TYPE_APPLICATION_DATA]));
     const nonce = xorSequenceIntoIv(this.clientAppIv!, this.clientSeqNum++);
-    const additionalData = tlsBytes(CONTENT_TYPE_APPLICATION_DATA, 3, 3, uint16be(plaintext.length + 16));
-    if (this.cipherConfig!.chacha) return chacha20Poly1305Encrypt(this.clientAppKey!, nonce, plaintext, additionalData);
-    if (!this.clientAppCryptoKey) this.clientAppCryptoKey = await importAesGcmKey(this.clientAppKey!, ['encrypt']);
+    const additionalData = tlsBytes(
+      CONTENT_TYPE_APPLICATION_DATA,
+      3,
+      3,
+      uint16be(plaintext.length + 16),
+    );
+    if (this.cipherConfig!.chacha)
+      return chacha20Poly1305Encrypt(this.clientAppKey!, nonce, plaintext, additionalData);
+    if (!this.clientAppCryptoKey)
+      this.clientAppCryptoKey = await importAesGcmKey(this.clientAppKey!, ['encrypt']);
     return aesGcmEncryptWithKey(this.clientAppCryptoKey, nonce, plaintext, additionalData);
   }
 
   async decryptTls13(ciphertext: Uint8Array): Promise<Uint8Array> {
     const nonce = xorSequenceIntoIv(this.serverAppIv!, this.serverSeqNum++);
-    const additionalData = tlsBytes(CONTENT_TYPE_APPLICATION_DATA, 3, 3, uint16be(ciphertext.length));
+    const additionalData = tlsBytes(
+      CONTENT_TYPE_APPLICATION_DATA,
+      3,
+      3,
+      uint16be(ciphertext.length),
+    );
     const decrypted = this.cipherConfig!.chacha
       ? await chacha20Poly1305Decrypt(this.serverAppKey!, nonce, ciphertext, additionalData)
       : await aesGcmDecryptWithKey(
-          this.serverAppCryptoKey || (this.serverAppCryptoKey = await importAesGcmKey(this.serverAppKey!, ['decrypt'])),
+          this.serverAppCryptoKey ||
+            (this.serverAppCryptoKey = await importAesGcmKey(this.serverAppKey!, ['decrypt'])),
           nonce,
           ciphertext,
           additionalData,
@@ -1157,7 +1371,11 @@ export class TlsClient {
   async write(data: Uint8Array): Promise<void> {
     const writer = this.socket.writable.getWriter();
     try {
-      await writer.write(this.isTls13 ? await this.encryptTls13(data) : await this.encryptTls12(data, CONTENT_TYPE_APPLICATION_DATA));
+      await writer.write(
+        this.isTls13
+          ? await this.encryptTls13(data)
+          : await this.encryptTls12(data, CONTENT_TYPE_APPLICATION_DATA),
+      );
     } finally {
       writer.releaseLock();
     }
@@ -1195,11 +1413,22 @@ async function chacha20Poly1305Encrypt(
   plaintext: Uint8Array,
   additionalData: Uint8Array,
 ): Promise<Uint8Array> {
-  const cryptoKey = await crypto.subtle.importKey('raw', key, { name: 'ChaCha20-Poly1305' }, false, ['encrypt']);
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    toOwnedUint8Array(key),
+    { name: 'ChaCha20-Poly1305' },
+    false,
+    ['encrypt'],
+  );
   const ciphertext = await crypto.subtle.encrypt(
-    { name: 'ChaCha20-Poly1305', iv: nonce, additionalData, tagLength: 128 },
+    {
+      name: 'ChaCha20-Poly1305',
+      iv: toOwnedUint8Array(nonce),
+      additionalData: toOwnedUint8Array(additionalData),
+      tagLength: 128,
+    },
     cryptoKey,
-    plaintext,
+    toOwnedUint8Array(plaintext),
   );
   return new Uint8Array(ciphertext);
 }
@@ -1210,11 +1439,22 @@ async function chacha20Poly1305Decrypt(
   ciphertext: Uint8Array,
   additionalData: Uint8Array,
 ): Promise<Uint8Array> {
-  const cryptoKey = await crypto.subtle.importKey('raw', key, { name: 'ChaCha20-Poly1305' }, false, ['decrypt']);
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    toOwnedUint8Array(key),
+    { name: 'ChaCha20-Poly1305' },
+    false,
+    ['decrypt'],
+  );
   const plaintext = await crypto.subtle.decrypt(
-    { name: 'ChaCha20-Poly1305', iv: nonce, additionalData, tagLength: 128 },
+    {
+      name: 'ChaCha20-Poly1305',
+      iv: toOwnedUint8Array(nonce),
+      additionalData: toOwnedUint8Array(additionalData),
+      tagLength: 128,
+    },
     cryptoKey,
-    ciphertext,
+    toOwnedUint8Array(ciphertext),
   );
   return new Uint8Array(plaintext);
 }

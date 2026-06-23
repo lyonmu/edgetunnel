@@ -20,16 +20,29 @@ function sha224Hex(s: string): string {
   const l = s.length * 8;
   s += String.fromCharCode(0x80);
   while ((s.length * 8) % 512 !== 448) s += String.fromCharCode(0);
-  const h = [0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4];
+  const h = [
+    0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4,
+  ];
   const hi = Math.floor(l / 0x100000000);
   const lo = l & 0xffffffff;
   s += String.fromCharCode(
-    (hi >>> 24) & 0xff, (hi >>> 16) & 0xff, (hi >>> 8) & 0xff, hi & 0xff,
-    (lo >>> 24) & 0xff, (lo >>> 16) & 0xff, (lo >>> 8) & 0xff, lo & 0xff,
+    (hi >>> 24) & 0xff,
+    (hi >>> 16) & 0xff,
+    (hi >>> 8) & 0xff,
+    hi & 0xff,
+    (lo >>> 24) & 0xff,
+    (lo >>> 16) & 0xff,
+    (lo >>> 8) & 0xff,
+    lo & 0xff,
   );
   const w: number[] = [];
   for (let i = 0; i < s.length; i += 4) {
-    w.push((s.charCodeAt(i) << 24) | (s.charCodeAt(i + 1) << 16) | (s.charCodeAt(i + 2) << 8) | s.charCodeAt(i + 3));
+    w.push(
+      (s.charCodeAt(i) << 24) |
+        (s.charCodeAt(i + 1) << 16) |
+        (s.charCodeAt(i + 2) << 8) |
+        s.charCodeAt(i + 3),
+    );
   }
   for (let i = 0; i < w.length; i += 16) {
     const x = new Array(64).fill(0);
@@ -39,18 +52,51 @@ function sha224Hex(s: string): string {
       const s1 = r(x[j - 2], 17) ^ r(x[j - 2], 19) ^ (x[j - 2] >>> 10);
       x[j] = (x[j - 16] + s0 + x[j - 7] + s1) >>> 0;
     }
-    let [a, b, c, d, e, f, g, h0] = h;
+    let [a, b, c, d, e, f, g, h0] = h as [
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+    ];
     for (let j = 0; j < 64; j++) {
       const S1 = r(e, 6) ^ r(e, 11) ^ r(e, 25);
       const ch = (e & f) ^ (~e & g);
-      const t1 = (h0 + S1 + ch + K[j] + x[j]) >>> 0;
+      const t1 = (h0 + S1 + ch + K[j]! + x[j]!) >>> 0;
       const S0 = r(a, 2) ^ r(a, 13) ^ r(a, 22);
       const maj = (a & b) ^ (a & c) ^ (b & c);
       const t2 = (S0 + maj) >>> 0;
-      h0 = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      h0 = g;
+      g = f;
+      f = e;
+      e = (d + t1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (t1 + t2) >>> 0;
     }
     for (let j = 0; j < 8; j++) {
-      h[j] = (h[j] + (j === 0 ? a : j === 1 ? b : j === 2 ? c : j === 3 ? d : j === 4 ? e : j === 5 ? f : j === 6 ? g : h0)) >>> 0;
+      h[j] =
+        (h[j]! +
+          (j === 0
+            ? a
+            : j === 1
+              ? b
+              : j === 2
+                ? c
+                : j === 3
+                  ? d
+                  : j === 4
+                    ? e
+                    : j === 5
+                      ? f
+                      : j === 6
+                        ? g
+                        : h0)) >>>
+        0;
     }
   }
   let hex = '';
@@ -62,7 +108,10 @@ function sha224Hex(s: string): string {
 
 const textDecoder = new TextDecoder();
 
-export function parseTrojanRequest(buffer: ArrayBuffer | ArrayBufferView, password: string): TrojanParseResult {
+export function parseTrojanRequest(
+  buffer: ArrayBuffer | ArrayBufferView,
+  password: string,
+): TrojanParseResult {
   const data = toUint8Array(buffer);
   const sha224Password = sha224Hex(password);
 
@@ -70,7 +119,7 @@ export function parseTrojanRequest(buffer: ArrayBuffer | ArrayBufferView, passwo
     return { ok: false, error: 'invalid data' };
   }
 
-  let crLfIndex = 56;
+  const crLfIndex = 56;
   if (data[crLfIndex] !== 0x0d || data[crLfIndex + 1] !== 0x0a) {
     return { ok: false, error: 'invalid header format' };
   }
@@ -93,9 +142,9 @@ export function parseTrojanRequest(buffer: ArrayBuffer | ArrayBufferView, passwo
   const command: 'tcp' | 'udp' = cmd === 1 ? 'tcp' : 'udp';
 
   const atype = data[socks5Index + 1]!;
-  let addressLength = 0;
+  let addressLength: number;
   let addressIndex = socks5Index + 2;
-  let hostname = '';
+  let hostname: string;
 
   switch (atype) {
     case 1:
@@ -116,7 +165,7 @@ export function parseTrojanRequest(buffer: ArrayBuffer | ArrayBufferView, passwo
       }
       hostname = textDecoder.decode(data.subarray(addressIndex, addressIndex + addressLength));
       break;
-    case 4:
+    case 4: {
       addressLength = 16;
       if (data.byteLength < addressIndex + addressLength + 4) {
         return { ok: false, error: 'invalid S5 request data' };
@@ -128,6 +177,7 @@ export function parseTrojanRequest(buffer: ArrayBuffer | ArrayBufferView, passwo
       }
       hostname = ipv6.join(':');
       break;
+    }
     default:
       return { ok: false, error: `invalid addressType is ${atype}` };
   }

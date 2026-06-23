@@ -1,8 +1,6 @@
 import { createUploadQueue } from '../networking/upload-queue';
-import { closeSocketQuietly } from '../networking/stream-pump';
 import { buildGrpcFrame, parseGrpcFrames, parseGrpcPayload } from './common';
 import {
-  createResponseBridge,
   createRemoteConnWrapper,
   parseFirstPacket,
   type TransportBridge,
@@ -13,7 +11,13 @@ import type { RequestContext } from '../app/types';
 export function handleGRPC(
   request: Request,
   ctx: RequestContext,
-  connectTCP: (host: string, port: number, data: Uint8Array | null, bridge: TransportBridge, wrapper: RemoteConnWrapper) => Promise<void>,
+  connectTCP: (
+    host: string,
+    port: number,
+    data: Uint8Array | null,
+    bridge: TransportBridge,
+    wrapper: RemoteConnWrapper,
+  ) => Promise<void>,
 ): Response {
   if (!request.body) return new Response('Bad Request', { status: 400 });
 
@@ -37,10 +41,10 @@ export function handleGRPC(
         const getRemoteWriter = () => {
           const socket = wrapper.socket;
           if (!socket) return null;
-          return (socket as any).writable.getWriter();
+          return socket.writable.getWriter();
         };
 
-        uploadQueue = (uploadQueueRef = createUploadQueue({
+        uploadQueue = uploadQueueRef = createUploadQueue({
           getWriter: getRemoteWriter,
           releaseWriter: () => {},
           retryConnect: async () => {
@@ -48,14 +52,18 @@ export function handleGRPC(
             await wrapper.retryConnect();
           },
           closeConnection: () => {
-            try { wrapper.socket?.close(); } catch { /* ignore */ }
+            try {
+              void wrapper.socket?.close();
+            } catch {
+              /* ignore */
+            }
             grpcBridge.close();
           },
           name: 'gRPC上行',
-        }));
+        });
 
         const writeToRemote = async (payload: Uint8Array, allowRetry = true) => {
-          return uploadQueue!.enqueueAndWait(payload, allowRetry);
+          return uploadQueue.enqueueAndWait(payload, allowRetry);
         };
 
         try {
@@ -65,9 +73,9 @@ export function handleGRPC(
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            if (!value || (value as any).byteLength === 0) continue;
+            if (!value || value.byteLength === 0) continue;
 
-            const chunk = value instanceof Uint8Array ? value : new Uint8Array(value as any);
+            const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
             const merged = new Uint8Array(pending.length + chunk.length);
             merged.set(pending, 0);
             merged.set(chunk, pending.length);
@@ -86,7 +94,11 @@ export function handleGRPC(
                 const firstPacket = parseFirstPacket(payload, ctx.userId);
                 if (!firstPacket) throw new Error('Invalid first packet');
 
-                if (firstPacket.isUDP && firstPacket.protocol !== 'trojan' && firstPacket.port !== 53) {
+                if (
+                  firstPacket.isUDP &&
+                  firstPacket.protocol !== 'trojan' &&
+                  firstPacket.port !== 53
+                ) {
                   throw new Error('UDP is not supported');
                 }
 
@@ -94,7 +106,13 @@ export function handleGRPC(
                   grpcBridge.send(firstPacket.respHeader);
                 }
 
-                await connectTCP(firstPacket.hostname, firstPacket.port, firstPacket.rawData, grpcBridge, wrapper);
+                await connectTCP(
+                  firstPacket.hostname,
+                  firstPacket.port,
+                  firstPacket.rawData,
+                  grpcBridge,
+                  wrapper,
+                );
                 if (firstPacket.rawData.byteLength > 0) continue;
               } else {
                 if (!(await writeToRemote(payload))) throw new Error('Remote socket is not ready');
@@ -104,19 +122,35 @@ export function handleGRPC(
           }
 
           await uploadQueue.waitIdle();
-        } catch (err) {
+        } catch {
           // error during gRPC processing
         } finally {
           uploadQueue?.clear();
-          try { reader.releaseLock(); } catch { /* ignore */ }
+          try {
+            reader.releaseLock();
+          } catch {
+            /* ignore */
+          }
           grpcBridge.close();
-          try { wrapper.socket?.close(); } catch { /* ignore */ }
+          try {
+            void wrapper.socket?.close();
+          } catch {
+            /* ignore */
+          }
         }
       },
       cancel() {
         uploadQueueRef?.clear();
-        try { wrapper.socket?.close(); } catch { /* ignore */ }
-        try { reader.releaseLock(); } catch { /* ignore */ }
+        try {
+          void wrapper.socket?.close();
+        } catch {
+          /* ignore */
+        }
+        try {
+          reader.releaseLock();
+        } catch {
+          /* ignore */
+        }
       },
     }),
     { status: 200, headers: grpcHeaders },
@@ -150,10 +184,12 @@ function createGrpcBridge(controller: ReadableStreamDefaultController): GrpcBrid
   };
 
   return {
-    get readyState() { return closed ? WebSocket.CLOSED : WebSocket.OPEN; },
+    get readyState() {
+      return closed ? WebSocket.CLOSED : WebSocket.OPEN;
+    },
     send(data) {
       if (closed) return;
-      const chunk = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
+      const chunk = data instanceof Uint8Array ? data : new Uint8Array(data);
       const frame = buildGrpcFrame(chunk);
       sendQueue.push(frame);
       queuedBytes += frame.byteLength;
@@ -166,7 +202,11 @@ function createGrpcBridge(controller: ReadableStreamDefaultController): GrpcBrid
       if (closed) return;
       flush();
       closed = true;
-      try { controller.close(); } catch { /* ignore */ }
+      try {
+        controller.close();
+      } catch {
+        /* ignore */
+      }
     },
   };
 }

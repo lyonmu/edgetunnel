@@ -4,7 +4,10 @@ export type VlessParseResult =
   | { ok: true; command: 'tcp' | 'udp'; hostname: string; port: number; payload: Uint8Array }
   | { ok: false; error: string };
 
-export function parseVlessRequest(chunk: ArrayBuffer | ArrayBufferView, uuid: string): VlessParseResult {
+export function parseVlessRequest(
+  chunk: ArrayBuffer | ArrayBufferView,
+  uuid: string,
+): VlessParseResult {
   const data = toUint8Array(chunk);
   const length = data.byteLength;
 
@@ -12,13 +15,11 @@ export function parseVlessRequest(chunk: ArrayBuffer | ArrayBufferView, uuid: st
     return { ok: false, error: 'Invalid data' };
   }
 
-  const version = data[0];
-
   if (!matchesUuid(data, 1, uuid)) {
     return { ok: false, error: 'Invalid uuid' };
   }
 
-  const optLen = data[17];
+  const optLen = data[17]!;
   const cmdIndex = 18 + optLen;
   if (length < cmdIndex + 4) {
     return { ok: false, error: 'Invalid data' };
@@ -35,11 +36,11 @@ export function parseVlessRequest(chunk: ArrayBuffer | ArrayBufferView, uuid: st
   }
 
   const portIdx = cmdIndex + 1;
-  const port = (data[portIdx] << 8) | data[portIdx + 1];
+  const port = (data[portIdx]! << 8) | data[portIdx + 1]!;
 
   let addrValIdx = portIdx + 3;
-  let addrLen = 0;
-  let hostname = '';
+  let addrLen: number;
+  let hostname: string;
 
   const addressType = data[portIdx + 2];
   switch (addressType) {
@@ -61,7 +62,7 @@ export function parseVlessRequest(chunk: ArrayBuffer | ArrayBufferView, uuid: st
       }
       hostname = new TextDecoder().decode(data.subarray(addrValIdx, addrValIdx + addrLen));
       break;
-    case 3:
+    case 3: {
       addrLen = 16;
       if (length < addrValIdx + addrLen) {
         return { ok: false, error: 'Invalid IPv6 address length' };
@@ -73,6 +74,7 @@ export function parseVlessRequest(chunk: ArrayBuffer | ArrayBufferView, uuid: st
       }
       hostname = ipv6.join(':');
       break;
+    }
     default:
       return { ok: false, error: `Invalid address type: ${addressType}` };
   }

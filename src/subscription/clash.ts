@@ -1,8 +1,7 @@
 import type { RequestContext } from '../app/types';
 
 export function applyClashPatch(content: string, context: RequestContext): string {
-  const { env } = context;
-  const uuid = env.UUID || '';
+  void context;
 
   let yaml = content.replace(/mode:\s*Rule\b/g, 'mode: rule');
 

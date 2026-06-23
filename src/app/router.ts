@@ -17,11 +17,6 @@ function isGRPCTraffic(request: Request): boolean {
   return contentType.startsWith('application/grpc');
 }
 
-function isXHTTPTraffic(request: Request): boolean {
-  const referer = request.headers.get('Referer') || '';
-  return referer.includes('x_padding', 14) || referer.includes('x_padding=');
-}
-
 export async function routeRequest(context: RequestContext): Promise<Response> {
   const { request, url } = context;
   const upgradeHeader = request.headers.get('Upgrade');

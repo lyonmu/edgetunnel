@@ -95,7 +95,8 @@ export function createUploadQueue(options: UploadQueueOptions) {
       if (nextLength > BUNDLE_TARGET_BYTES) break;
       byteLength = nextLength;
       allowRetry = allowRetry && next.allowRetry;
-      if (next.completions) completions = completions ? completions.concat(next.completions) : next.completions;
+      if (next.completions)
+        completions = completions ? completions.concat(next.completions) : next.completions;
       end++;
     }
     if (end === head) return first;
@@ -148,7 +149,11 @@ export function createUploadQueue(options: UploadQueueOptions) {
     } catch (err) {
       closed = true;
       clear(err);
-      try { closeConnection?.(err); } catch { /* ignore */ }
+      try {
+        closeConnection?.(err);
+      } catch {
+        /* ignore */
+      }
     } finally {
       draining = false;
       if (!closed && head < chunks.length) queueMicrotask(drain);
@@ -156,7 +161,11 @@ export function createUploadQueue(options: UploadQueueOptions) {
     }
   };
 
-  const enqueueBase = (data: Uint8Array | ArrayBuffer, allowRetry = true, waitForFlush = false): boolean | Promise<boolean> => {
+  const enqueueBase = (
+    data: Uint8Array | ArrayBuffer,
+    allowRetry = true,
+    waitForFlush = false,
+  ): boolean | Promise<boolean> => {
     if (closed) return false;
     if (!getWriter()) return false;
     const chunk = data instanceof Uint8Array ? data : new Uint8Array(data);
@@ -165,16 +174,25 @@ export function createUploadQueue(options: UploadQueueOptions) {
     const nextItems = chunks.length - head + 1;
     if (nextBytes > MAX_QUEUE_BYTES || nextItems > MAX_QUEUE_ITEMS) {
       closed = true;
-      const err = Object.assign(new Error(`${name}: upload queue overflow (${nextBytes}B/${nextItems})`), { isQueueOverflow: true });
+      const err = Object.assign(
+        new Error(`${name}: upload queue overflow (${nextBytes}B/${nextItems})`),
+        { isQueueOverflow: true },
+      );
       clear(err);
-      try { closeConnection?.(err); } catch { /* ignore */ }
+      try {
+        closeConnection?.(err);
+      } catch {
+        /* ignore */
+      }
       throw err;
     }
     let completionPromise: Promise<boolean> | null = null;
     let completions: QueueItem['completions'] = null;
     if (waitForFlush) {
       completions = [];
-      completionPromise = new Promise<boolean>((resolve, reject) => completions!.push({ resolve: () => resolve(true), reject }));
+      completionPromise = new Promise<boolean>((resolve, reject) =>
+        completions!.push({ resolve: () => resolve(true), reject }),
+      );
     }
     chunks.push({ chunk, allowRetry, completions });
     queuedBytes = nextBytes;

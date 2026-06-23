@@ -62,7 +62,7 @@ export async function fetchTextLimited(
           const remaining = limit.maxBytes - totalBytes;
           if (remaining <= 0) {
             cancelled = true;
-            reader.cancel();
+            await reader.cancel();
             break;
           }
 
@@ -72,7 +72,7 @@ export async function fetchTextLimited(
 
           if (totalBytes >= limit.maxBytes) {
             cancelled = true;
-            reader.cancel();
+            await reader.cancel();
             break;
           }
         }
@@ -82,7 +82,7 @@ export async function fetchTextLimited(
     }
 
     const decoder = new TextDecoder();
-    const text = chunks.map(chunk => decoder.decode(chunk, { stream: true })).join('');
+    const text = chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('');
 
     return {
       ok: response.ok,
