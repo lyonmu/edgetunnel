@@ -5,7 +5,13 @@ import { createRequestContext } from '../../src/app/request-context';
 const uuid = '90cd4a77-141a-43c9-991b-08263cfe9c10';
 
 function createEnv(overrides: Partial<Env> = {}): Env {
-  return Object.assign(Object.create(env), { ADMIN: 'admin', UUID: uuid }, overrides) as Env;
+  return {
+    KV: env.KV,
+    ASSETS: env.ASSETS,
+    ADMIN: 'admin',
+    UUID: uuid,
+    ...overrides,
+  };
 }
 
 describe('createRequestContext', () => {

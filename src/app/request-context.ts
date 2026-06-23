@@ -1,5 +1,6 @@
 import type { RequestContext } from './types';
 import { parseProxyRuntime } from '../networking/proxy-runtime';
+import { md5Twice } from '../shared/hash';
 
 const DEFAULT_KEY = '勿动此默认密钥，有需求请自行通过添加变量KEY进行修改';
 const DEFAULT_WHITELIST = [
@@ -23,16 +24,6 @@ function splitList(value: string): string[] {
 
 function scalarString(value: unknown): string {
   return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
-}
-
-async function md5Twice(value: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const first = new Uint8Array(await crypto.subtle.digest('MD5', encoder.encode(value)));
-  const firstHex = Array.from(first, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  const second = new Uint8Array(
-    await crypto.subtle.digest('MD5', encoder.encode(firstHex.slice(7, 27))),
-  );
-  return Array.from(second, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function deriveUserId(

@@ -1,12 +1,9 @@
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    if (url.pathname === '/robots.txt') {
-      return new Response('User-agent: *\nDisallow: /', {
-        headers: { 'Content-Type': 'text/plain; charset=UTF-8' },
-      });
-    }
+import { createRequestContext } from './app/request-context';
+import { routeRequest } from './app/router';
 
-    return env.ASSETS.fetch(request);
+export default {
+  async fetch(request: Request, env: Env, execution: ExecutionContext): Promise<Response> {
+    const context = await createRequestContext(request, env, execution);
+    return routeRequest(context);
   },
 } satisfies ExportedHandler<Env>;

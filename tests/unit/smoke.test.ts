@@ -1,14 +1,20 @@
+import { createExecutionContext, env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import worker from '../../src/index';
-import '../../src/app/types';
 
 describe('Worker smoke', () => {
   it('serves robots.txt', async () => {
-    const env = {
-      KV: {} as KVNamespace,
-      ASSETS: {} as Fetcher,
-    } as Env;
-    const response = await worker.fetch(new Request('https://example.com/robots.txt'), env);
+    const testEnv = {
+      KV: env.KV,
+      ASSETS: env.ASSETS,
+      ADMIN: 'admin',
+      UUID: '90cd4a77-141a-43c9-991b-08263cfe9c10',
+    };
+    const response = await worker.fetch(
+      new Request('https://example.com/robots.txt'),
+      testEnv,
+      createExecutionContext(),
+    );
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('User-agent: *\nDisallow: /');
