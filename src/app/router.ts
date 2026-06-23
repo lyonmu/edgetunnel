@@ -1,4 +1,5 @@
 import type { RequestContext } from './types';
+import legacyWorker from '../../_worker.js';
 import { routeAdminRequest } from '../admin/routes';
 import { fetchAdminAsset } from '../admin/assets';
 
@@ -25,5 +26,5 @@ export async function routeRequest(context: RequestContext): Promise<Response> {
       headers: { 'Content-Type': 'text/plain; charset=UTF-8' },
     });
   }
-  return context.env.ASSETS.fetch(context.request);
+  return legacyWorker.fetch(context.request, context.env, context.execution);
 }

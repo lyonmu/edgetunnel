@@ -1,4 +1,6 @@
-﻿const Version = '2026-06-17 01:41:21';
+﻿import { connect as cloudflareConnect } from 'cloudflare:sockets';
+
+const Version = '2026-06-17 01:41:21';
 let config_JSON, 反代IP = '', 启用SOCKS5反代 = null, 启用SOCKS5全局反代 = false, 我的SOCKS5账号 = '', parsedSocks5Address = {};
 let 缓存SOCKS5白名单 = null, 缓存反代IP, 缓存反代解析数组, 缓存反代数组索引 = 0, 启用反代兜底 = true, 调试日志打印 = false;
 let SOCKS5白名单 = ['*tapecontent.net', '*cloudatacdn.com', '*loadshare.org', '*cdn-centaurus.com', 'scholar.google.com'];
@@ -2695,11 +2697,8 @@ async function httpsConnect(targetHost, targetPort, initialData, TCP连接) {
 	}
 }
 
-function 创建请求TCP连接器(request) {
-	const 请求对象 = /** @type {any} */ (request);
-	const fetcher = 请求对象?.fetcher;
-	if (!fetcher || typeof fetcher.connect !== 'function') throw new Error('request.fetcher.connect unavailable');
-	return (options, init) => init === undefined ? fetcher.connect(options) : fetcher.connect(options, init);
+function 创建请求TCP连接器() {
+	return (options, init) => init === undefined ? cloudflareConnect(options) : cloudflareConnect(options, init);
 }
 ////////////////////////////////////////////TLSClient by: @Alexandre_Kojeve////////////////////////////////////////////////
 const TLS_VERSION_10 = 769, TLS_VERSION_12 = 771, TLS_VERSION_13 = 772;

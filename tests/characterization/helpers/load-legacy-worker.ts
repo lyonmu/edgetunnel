@@ -18,7 +18,9 @@ type LegacyExports = Record<LegacyExportName, unknown>;
 
 export async function loadLegacyWorker(): Promise<LegacyExports> {
   const source = await readFile('_worker.js', 'utf8');
-  const transformed = source.replace('export default {', 'const legacyWorker = {');
+  const transformed = source
+    .replace("import { connect as cloudflareConnect } from 'cloudflare:sockets';", '')
+    .replace('export default {', 'const legacyWorker = {');
   const exportSource = `\n;globalThis.__legacy = { ${exportedNames.join(', ')} };`;
   const context = vm.createContext({
     URL,
