@@ -13,5 +13,19 @@
       "preview_id": "0e717d6f1053494e82b29c359b1220a2",
     },
   ],
+  "env": {
+    "preview": {
+      "name": "edgetunnel-preview",
+      "kv_namespaces": [
+        {
+          "binding": "KV",
+          "id": "0e717d6f1053494e82b29c359b1220a2",
+        },
+      ],
+      "vars": {
+        "OFF_LOG": "true",
+      },
+    },
+  },
   "observability": { "enabled": true, "head_sampling_rate": 0.1 },
 }

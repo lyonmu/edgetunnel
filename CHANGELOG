@@ -1,3 +1,12 @@
+## [Unreleased]
+
+### Change
+
+- 将部署平台迁移为纯 Cloudflare Worker，管理后台通过 Worker Static Assets 与代码同版本发布。
+- 将 Worker 实现拆分为 TypeScript 模块，并使用 Cloudflare 官方 Socket API。
+- 保持现有 URL、环境变量别名、Cookie、KV key、订阅格式和代理协议行为兼容。
+- 增加独立 Preview Worker 和 Preview KV，避免非生产验证访问生产 KV。
+
 ## [2.1.20260617014121] - 2026-06-17 01:41:21
 
 ### ADD
