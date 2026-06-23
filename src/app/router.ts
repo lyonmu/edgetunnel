@@ -2,6 +2,7 @@ import type { RequestContext } from './types';
 import legacyWorker from '../../_worker.js';
 import { routeAdminRequest } from '../admin/routes';
 import { fetchAdminAsset } from '../admin/assets';
+import { handleSubscriptionRequest } from '../subscription/routes';
 
 export async function routeRequest(context: RequestContext): Promise<Response> {
   if (context.url.protocol === 'http:') {
@@ -21,6 +22,12 @@ export async function routeRequest(context: RequestContext): Promise<Response> {
   if (admin) {
     return admin;
   }
+
+  const subscription = await handleSubscriptionRequest(context);
+  if (subscription) {
+    return subscription;
+  }
+
   if (context.url.pathname === '/robots.txt') {
     return new Response('User-agent: *\nDisallow: /', {
       headers: { 'Content-Type': 'text/plain; charset=UTF-8' },
