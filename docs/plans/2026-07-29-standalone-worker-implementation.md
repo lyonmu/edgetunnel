@@ -829,23 +829,23 @@ git commit -m "refactor(worker): 删除旧 Pages 兼容实现"
 
 - Produces: GitHub -> Workers Builds 可直接部署的 Production/Preview 配置
 
-- [ ] **Step 1: 写 Wrangler 配置测试**
+- [x] **Step 1: 写 Wrangler 配置测试**
 
 解析 JSONC 后断言 main、Assets、run_worker_first、`compatibility_date = 2026-07-29`、
 Production/Preview KV 不同、Preview Worker 名独立、无旧 vars、observability 配置存在。
 
-- [ ] **Step 2: 更新 Wrangler 并生成类型**
+- [x] **Step 2: 更新 Wrangler 并生成类型**
 
 Production/Preview 只声明 `KV` 和 `ASSETS` bindings；Secret 通过控制台或 `wrangler secret put` 设置，
 不进入 vars。运行 `npm run types`。
 
-- [ ] **Step 3: 重写用户文档**
+- [x] **Step 3: 重写用户文档**
 
 README 包含能力矩阵、快速部署、五个 Secret、KV、Workers Builds、Custom Domain 要求和本地检查。
 runbook 包含 Preview 上传、零流量验证、Production 门禁和 Pages 保留/回滚。security 文档包含 Secret
 备份、日志边界、token 撤销、私网目标阻止和漏洞报告。
 
-- [ ] **Step 4: 验证文档和配置**
+- [x] **Step 4: 验证文档和配置**
 
 ```bash
 npx vitest run --config vitest.config.ts tests/unit/wrangler-config.test.ts
@@ -855,7 +855,7 @@ npx prettier --check README.md docs wrangler.jsonc
 git diff --check
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add wrangler.jsonc worker-configuration.d.ts README.md docs/security.md docs/worker-migration-runbook.md docs/e2e/worker-preview-results.md tests/unit/wrangler-config.test.ts

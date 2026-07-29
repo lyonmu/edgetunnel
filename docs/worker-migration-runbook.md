@@ -1,152 +1,135 @@
-# EdgeTunnel Worker 迁移运行手册
+# EdgeTunnel Worker 部署与回滚手册
 
-本文档用于将 EdgeTunnel 作为纯 Cloudflare Worker 部署，并在正式切换前完成隔离预览、代理协议验证和回滚准备。
+本文用于将 EdgeTunnel 作为纯 Cloudflare Worker 部署、验证并切换自定义域。原 Pages 项目保留且保持 GitHub 自动部署断开；除自定义域切换外，不修改、覆盖或删除 Pages。
 
-现有 Pages 项目仅作为迁移回滚环境保留。Pages 已断开 GitHub 自动部署，不重新连接 Git、不删除项目、不覆盖原部署。
+## 资源边界
 
-## Workers Builds 配置
+| 环境       | Worker               | KV              | 域名                                        |
+| ---------- | -------------------- | --------------- | ------------------------------------------- |
+| Production | `edgetunnel`         | Production KV   | `workers.dev`，验收后可绑定正式域名         |
+| Preview    | `edgetunnel-preview` | 独立 Preview KV | Preview URL/`workers.dev`，不得绑定正式域名 |
+| Rollback   | 原 Pages 项目        | 原 Pages 资源   | 保留 `pages.dev`，需要时重新绑定正式域名    |
 
-在 Cloudflare 控制台创建 Worker `edgetunnel`，连接 GitHub 仓库后设置：
+`wrangler.jsonc` 的 `env.preview.kv_namespaces` 显式覆盖 Production KV。任何预览写入都必须落在 Preview KV。
 
-| 配置项                               | 值                                           |
-| ------------------------------------ | -------------------------------------------- |
-| Production branch                    | `main`                                       |
-| Build command                        | `npm run check`                              |
-| Deploy command                       | `npx wrangler deploy --env=""`               |
-| Non-production branch deploy command | `npx wrangler versions upload --env preview` |
-| Root directory                       | `/`                                          |
-| Non-production branch builds         | 启用                                         |
+## 前置检查
 
-非生产命令必须带 `--env preview`。`kv_namespaces.preview_id` 只用于 `wrangler dev`，不会自动隔离 `wrangler versions upload` 的远程 KV。
+```bash
+npm ci
+npm run check
+npx wrangler whoami
+npx wrangler deployments list --env=""
+npx wrangler versions list --env=""
+```
 
-## Worker 与绑定
+记录当前 Production version、Production KV ID、Pages `pages.dev` 地址和当前自定义域绑定，作为回滚基线。
 
-### Production
+## Secret
 
-- Worker：`edgetunnel`
-- KV binding：`KV`
-- KV namespace：现有生产 KV
-- Static Assets：`public/`
-- Asset binding：`ASSETS`
-- Worker-first routing：`assets.run_worker_first=true`
-
-### Preview
-
-- Worker：`edgetunnel-preview`
-- KV binding：`KV`
-- KV namespace：独立 Preview KV
-- Static Assets：与该 Worker 版本一同上传
-- 默认变量：`OFF_LOG=true`
-- 不绑定正式自定义域
-- 只通过版本化 Preview URL 或 `edgetunnel-preview.workers.dev` 验证
-
-Wrangler 的 bindings 和 vars 不会从顶层自动继承到命名环境，因此 `env.preview.kv_namespaces` 和 `env.preview.vars` 必须显式配置。
-
-## Runtime Variables 与 Secrets
-
-只记录名称，禁止把真实值提交到 Git。
-
-建议作为 Secret 配置：
+Production 和 Preview 分别设置以下 Secret：
 
 - `ADMIN`
-- `KEY`
 - `UUID`
-- `PROXYIP` 中包含认证信息时
-- `GO2SOCKS5` 中包含认证信息时
+- `CONFIG_KEY`
+- `TROJAN_PASSWORD`
+- `SHADOWSOCKS_PASSWORD`
 
-可按实际需求配置的非敏感变量：
+`wrangler.jsonc` 通过 `secrets.required` 声明名称并在部署前验证是否存在，但不保存值。`CONFIG_KEY` 必须是 32 字节 base64url；丢失后将无法解密已保存在 KV 中的代理凭据。
 
-- `HOST`
-- `PATH`
-- `URL`
-- `DEBUG`
-- `OFF_LOG`
-- `BEST_SUB`
-- `PRELOAD_RACE_DIAL`
-- `SUBAPI`
-- `SUBCONFIG`
-
-Preview 和 Production 的 Secret 独立配置。Preview 不复用生产 `ADMIN`、`KEY` 或代理认证信息。
-
-示例命令只表示名称，执行时通过 Wrangler 交互式输入或安全文件输入：
+使用 Cloudflare 控制台添加最安全。若使用 CLI，避免把值放在命令行参数或 shell 历史中：
 
 ```bash
 npx wrangler secret put ADMIN --env preview
-npx wrangler secret put KEY --env preview
 npx wrangler secret put UUID --env preview
+npx wrangler secret put CONFIG_KEY --env preview
+npx wrangler secret put TROJAN_PASSWORD --env preview
+npx wrangler secret put SHADOWSOCKS_PASSWORD --env preview
 ```
 
-## 预览部署
+Production 使用相同命令但省略 `--env preview`。Preview 必须使用不同的 `ADMIN`、`CONFIG_KEY` 和协议凭据。
 
-1. 确认 `npm ci` 和 `npm run check` 成功。
-2. 推送非生产分支。
-3. 等待 Workers Builds 执行：
-   - `npm run check`
-   - `npx wrangler versions upload --env preview`
-4. 记录 Worker version ID 和版本化 Preview URL。
-5. 确认预览版本的 `KV` 指向 Preview KV。
-6. 只在 Preview KV 中执行配置保存和日志测试。
+## Cloudflare Workers Builds
 
-## 验证矩阵
+Cloudflare 控制台可以直接从 Git 克隆、安装、检查并部署：
 
-| 类别     | 必测项                                                                        |
-| -------- | ----------------------------------------------------------------------------- |
-| 管理后台 | 登录、退出、配置读取、配置保存、日志读取、日志清理、静态资源                  |
-| 管理接口 | `/login`、`/admin`、`/admin/config.json`、`/admin/ADD.txt`、`/admin/log.json` |
-| 订阅     | mixed、base64、Clash、Sing-box、Surge                                         |
-| 传输层   | WebSocket、XHTTP、gRPC                                                        |
-| 入站协议 | VLESS、Trojan、Shadowsocks                                                    |
-| 出站模式 | 直连、ProxyIP、SOCKS5、HTTP、HTTPS、TURN、SSTP                                |
-| 数据流   | 小包、大文件上传、大文件下载、断线重连、半关闭                                |
-| DNS      | UDP DNS、DoH、A、AAAA、TXT                                                    |
-| 兼容接口 | `/sub`、`/version`、快速订阅路径、Cookie 和响应头                             |
+| 配置项            | 值                             |
+| ----------------- | ------------------------------ |
+| Production branch | 正式分支，例如 `main`          |
+| Build command     | `npm run check`                |
+| Deploy command    | `npx wrangler deploy --env=""` |
+| Root directory    | `/`                            |
 
-任一真实代理失败都阻止自定义域切换。禁止通过降低测试要求、改变协议输出或直接改用生产 KV 绕过失败。
+如果启用非生产分支构建，使用独立的 Preview Worker/KV。不要让分支构建部署到 `edgetunnel` Production Worker。
 
-## 正式切换
+## Preview 验证
 
-正式切换前必须具备：
+只上传版本、不分配 Production 流量：
 
-- `npm run check` 成功记录
-- Preview Worker version ID
-- 完整真实代理 E2E 结果
-- 生产 KV 备份确认
-- 自定义域切换步骤
-- 回滚步骤
-- 预计影响窗口
-- 用户明确批准
+```bash
+npx wrangler versions upload --env preview
+```
 
-切换顺序：
+验收顺序：
 
-1. 合并到 `main`，由 Workers Builds 执行 `npx wrangler deploy --env=""`。
-2. 在 `workers.dev` 对生产绑定做只读验证。
-3. 从 Pages 移除正式自定义域绑定。
-4. 将同一自定义域添加为 Worker Custom Domain。
-5. 执行登录、后台资源、订阅和三种传输协议冒烟测试。
-6. 记录 Worker version ID、切换时间和验证结果。
+1. `/version` 返回 200；
+2. `/login`、登录、退出和 `/admin` 正常；
+3. 配置读取/保存、revision 冲突和加密凭据写入正常；
+4. mixed、base64、Clash、sing-box、Surge 订阅输出可导入；
+5. VLESS/Trojan/Shadowsocks WebSocket 真实连接；
+6. VLESS PacketAddr/XUDP DNS；
+7. gRPC/XHTTP（若测试域名和客户端支持）；
+8. Direct、ProxyIP 以及已配置的链式代理；
+9. 上传、下载、重连、半关闭；
+10. 日志不包含密码、Cookie、订阅 token 或完整目标地址。
+
+任何核心数据面失败都阻止自定义域切换。不可用能力应禁用并在 E2E 记录中说明，不得伪造通过。
+
+## Production 部署
+
+先确保 Pages 的 GitHub 连接仍为断开状态，并确认 Pages `pages.dev` 可访问。
+
+```bash
+npx wrangler deploy --env=""
+```
+
+部署后先使用 Production `workers.dev` 地址完成以下只读/低风险检查：
+
+- `/version`、`/login`、`/admin`；
+- Production KV binding 正确；
+- 默认配置没有覆盖现有 v1 配置；
+- 订阅格式和至少一个真实 WebSocket 代理连接正常；
+- Worker 日志无持续异常。
+
+## 自定义域切换
+
+Cloudflare 不允许同一个 hostname 同时属于 Pages Custom Domain 和 Worker Custom Domain。
+
+1. 记录 Pages 当前域名绑定和 DNS 状态；
+2. 从 Pages 项目移除正式自定义域绑定，保留 Pages 项目和 `pages.dev`；
+3. 将同一 hostname 添加到 `edgetunnel` Worker 的 Custom Domains；
+4. 等待证书和路由状态生效；
+5. 通过正式域名重跑登录、订阅、WebSocket、gRPC/XHTTP（如启用）；
+6. 记录切换时间、Worker version ID 和验证结果。
+
+不要删除 Pages 项目、Pages 部署或 Production KV。
 
 ## 回滚
 
-现有 Pages 项目保持不变并停止自动部署。回滚条件包括：
+触发条件包括管理后台不可用、订阅不可导入、核心代理失败、KV 异常或持续 5xx。
 
-- 登录或管理后台不可用
-- 订阅输出不兼容
-- 任一主要传输协议不可用
-- KV 读取异常
-- 大文件上传、下载或重连出现阻断性问题
+1. 从 Worker 移除正式 Custom Domain；
+2. 将该域名重新添加到原 Pages 项目；
+3. 验证 Pages `pages.dev` 和正式域名；
+4. 保留故障 Worker version、日志和 KV，不执行删除；
+5. 更新 E2E 记录并分析原因。
 
-回滚顺序：
-
-1. 从 Worker 移除正式自定义域。
-2. 将正式自定义域重新绑定到原 Pages 项目。
-3. 验证 `pages.dev` 和正式自定义域均可访问。
-4. 保留故障 Worker version、日志和 E2E 证据。
-5. 不删除 Worker、生产 KV 或 Pages 项目。
+如果问题仅由 Worker 版本引起，也可先回滚到部署前记录的 Worker version，再决定是否切回 Pages。
 
 ## Pages 保留策略
 
-- Pages 项目：保留
-- Pages GitHub 连接：保持断开
-- Pages 自动部署：保持关闭
-- Pages `pages.dev` 地址：作为回滚健康检查地址保留
-- 正式切换后：仅移除 Pages 的正式自定义域，不停用 Pages 项目
+- Pages 项目：保留；
+- Pages GitHub 连接：保持断开；
+- Pages 自动部署：保持关闭；
+- Pages `pages.dev`：持续作为回滚健康检查；
+- 正式域名切换：只调整域名绑定；
+- 禁止为“清理”删除 Pages、KV、Worker 历史版本或证据。

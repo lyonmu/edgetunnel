@@ -3,6 +3,10 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['tests/integration/connectors/**/*.test.ts', 'tests/unit/no-legacy.test.ts'],
+    include: [
+      'tests/integration/connectors/**/*.test.ts',
+      'tests/unit/no-legacy.test.ts',
+      'tests/unit/wrangler-config.test.ts',
+    ],
   },
 });
