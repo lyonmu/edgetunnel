@@ -29,6 +29,11 @@ function isGRPCTraffic(request: Request): boolean {
   return !referer.includes('x_padding') && contentType.startsWith('application/grpc');
 }
 
+function matchesXHTTPPath(pathname: string, configuredPath: string): boolean {
+  const normalized = configuredPath === '/' ? '/' : configuredPath.replace(/\/+$/, '');
+  return pathname === normalized || (normalized !== '/' && pathname === `${normalized}/`);
+}
+
 function runtimeUnavailable(context: RequestContext, error?: unknown): Response {
   const message =
     error instanceof RuntimeConfigurationError ? error.message : 'Worker 运行时尚未完成配置';
@@ -85,7 +90,7 @@ async function routeDataPlane(context: RequestContext): Promise<Response | null>
     if (
       streamPost &&
       dataPlane.snapshot.config.transports.xhttp.enabled &&
-      url.pathname === dataPlane.snapshot.config.transports.xhttp.path
+      matchesXHTTPPath(url.pathname, dataPlane.snapshot.config.transports.xhttp.path)
     ) {
       return handleXHTTP(request, dataPlane.context, dataPlane.connectTCP);
     }
