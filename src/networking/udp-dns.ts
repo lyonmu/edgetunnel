@@ -3,9 +3,11 @@ import { concatBytes } from '../shared/bytes';
 import { cloudflareSocketConnector, type SocketConnector } from './sockets';
 
 const DNS_SERVER = { hostname: '8.8.4.4', port: 53 } as const;
+const DNS_DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query';
 const DNS_TIMEOUT_MS = 10_000;
 
 export type DnsQuery = (payload: Uint8Array) => Promise<Uint8Array>;
+type DnsFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 async function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -77,6 +79,28 @@ export async function queryDnsTcp(
   }
 }
 
+export async function queryDnsDoh(
+  payload: Uint8Array,
+  fetcher: DnsFetcher = fetch,
+): Promise<Uint8Array> {
+  if (!payload.byteLength) throw new Error('DNS query is empty');
+  const response = await withTimeout(
+    fetcher(DNS_DOH_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/dns-message',
+        'Content-Type': 'application/dns-message',
+      },
+      body: new Uint8Array(payload),
+    }),
+    'DNS-over-HTTPS query timed out',
+  );
+  if (!response.ok) {
+    throw new Error(`DNS-over-HTTPS query failed: ${response.status}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 function dnsFrame(payload: Uint8Array): Uint8Array {
   const frame = new Uint8Array(payload.byteLength + 2);
   new DataView(frame.buffer).setUint16(0, payload.byteLength);
@@ -92,7 +116,7 @@ export function createDnsUdpSession(
   protocol: 'vless' | 'trojan',
   bridge: TransportBridge,
   responseHeader: Uint8Array | null,
-  query: DnsQuery = queryDnsTcp,
+  query: DnsQuery = queryDnsDoh,
 ) {
   let pending: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   let header = responseHeader;

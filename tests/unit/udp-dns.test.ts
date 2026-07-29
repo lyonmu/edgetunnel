@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TransportBridge } from '../../src/transports/bridge';
-import { createDnsUdpSession } from '../../src/networking/udp-dns';
+import { createDnsUdpSession, queryDnsDoh } from '../../src/networking/udp-dns';
 
 function collectingBridge() {
   const sent: Uint8Array[] = [];
@@ -15,6 +15,25 @@ function collectingBridge() {
 }
 
 describe('DNS UDP session', () => {
+  it('forwards raw DNS messages through DoH', async () => {
+    const query = new Uint8Array([1, 2, 3]);
+    const response = new Uint8Array([4, 5, 6]);
+    const fetcher = vi.fn(async () => new Response(response, { status: 200 }));
+
+    await expect(queryDnsDoh(query, fetcher)).resolves.toEqual(response);
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://cloudflare-dns.com/dns-query',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          Accept: 'application/dns-message',
+          'Content-Type': 'application/dns-message',
+        },
+        body: query,
+      }),
+    );
+  });
+
   it('buffers fragmented VLESS UDP frames and sends the response header once', async () => {
     const { bridge, sent } = collectingBridge();
     const query = vi.fn(async (payload: Uint8Array) => new Uint8Array([...payload, 9]));
