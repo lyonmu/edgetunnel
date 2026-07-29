@@ -115,14 +115,12 @@ describe('parseVlessRequest', () => {
   });
 
   it('recognizes Single XUDP carried by the VLESS Mux command', () => {
-    const packet = createVlessPacket(
-      testUuid,
-      3,
-      2,
-      new TextEncoder().encode('v1.mux.cool'),
-      666,
-      new Uint8Array([0, 4, 0, 0, 4, 0]),
+    const payload = new Uint8Array([0, 4, 0, 0, 4, 0]);
+    const packet = createVlessPacket(testUuid, 3, 0, new Uint8Array(), 0, payload).slice(
+      0,
+      19 + payload.byteLength,
     );
+    packet.set(payload, 19);
 
     const result = parseVlessRequest(packet, testUuid);
 
@@ -130,7 +128,8 @@ describe('parseVlessRequest', () => {
       ok: true,
       command: 'xudp',
       hostname: 'v1.mux.cool',
-      port: 666,
+      port: 0,
+      payload,
     });
   });
 });

@@ -17,7 +17,7 @@ export function parseVlessRequest(
   const data = toUint8Array(chunk);
   const length = data.byteLength;
 
-  if (length < 24) {
+  if (length < 19) {
     return { ok: false, error: 'Invalid data' };
   }
 
@@ -27,7 +27,7 @@ export function parseVlessRequest(
 
   const optLen = data[17]!;
   const cmdIndex = 18 + optLen;
-  if (length < cmdIndex + 4) {
+  if (length < cmdIndex + 1) {
     return { ok: false, error: 'Invalid data' };
   }
 
@@ -38,11 +38,20 @@ export function parseVlessRequest(
   } else if (cmd === 2) {
     command = 'udp';
   } else if (cmd === 3) {
-    command = 'xudp';
+    return {
+      ok: true,
+      command: 'xudp',
+      hostname: 'v1.mux.cool',
+      port: 0,
+      payload: data.subarray(cmdIndex + 1),
+    };
   } else {
     return { ok: false, error: 'Invalid command' };
   }
 
+  if (length < cmdIndex + 4) {
+    return { ok: false, error: 'Invalid data' };
+  }
   const portIdx = cmdIndex + 1;
   const port = (data[portIdx]! << 8) | data[portIdx + 1]!;
 
@@ -90,10 +99,6 @@ export function parseVlessRequest(
   if (!hostname) {
     return { ok: false, error: 'Empty hostname' };
   }
-  if (command === 'xudp' && (hostname.toLowerCase() !== 'v1.mux.cool' || port !== 666)) {
-    return { ok: false, error: 'Invalid XUDP Mux target' };
-  }
-
   const payloadOffset = addrValIdx + addrLen;
   const payload = data.subarray(payloadOffset);
 
