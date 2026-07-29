@@ -7,7 +7,7 @@
 - 验收源码提交：`7b80035`
 - 架构：纯 Cloudflare Worker + Static Assets + KV
 - Preview Worker：`edgetunnel-preview`
-- Preview version：`e2f81539-a120-4951-a5e8-c61cc6aa0180`
+- Preview version：`c0d554c7-b638-47be-9054-defe329347ee`
 - Production Worker：`edgetunnel`
 - Production version：`cca3cefa-fd02-4fbe-b2e3-2d6521f3b4fb`
 - Production 地址：`https://edgetunnel.muqingcloud.space`
