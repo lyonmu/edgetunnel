@@ -1,5 +1,5 @@
 import type { RequestContext } from '../app/types';
-import { createAuthToken, readAuthCookie } from '../auth/session';
+import { createLegacyAuthToken, readLegacyAuthCookie } from '../auth/legacy-session';
 import { createLegacyDefaultConfig } from '../config/legacy-defaults';
 import { loadStoredConfig, saveStoredConfig } from '../config/repository';
 import { buildRuntimeConfig } from '../config/runtime';
@@ -24,11 +24,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function expectedAuthToken(context: RequestContext): Promise<string> {
-  return createAuthToken(context.userAgent, context.encryptionKey, context.adminPassword);
+  return createLegacyAuthToken(context.userAgent, context.encryptionKey, context.adminPassword);
 }
 
 async function isAuthenticated(context: RequestContext): Promise<boolean> {
-  const cookie = readAuthCookie(context.request);
+  const cookie = readLegacyAuthCookie(context.request);
   return Boolean(cookie && cookie === (await expectedAuthToken(context)));
 }
 

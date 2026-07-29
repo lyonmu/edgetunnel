@@ -1,6 +1,6 @@
 import type { RequestContext } from './types';
 import { DEFAULT_ENCRYPTION_KEY } from './request-context';
-import { createAuthToken, readAuthCookie } from '../auth/session';
+import { createLegacyAuthToken, readLegacyAuthCookie } from '../auth/legacy-session';
 import { md5Twice } from '../shared/hash';
 
 const WORKER_VERSION = 20260617014121;
@@ -48,8 +48,8 @@ export async function routeQuickSubscription(context: RequestContext): Promise<R
 
 export async function routeLocations(context: RequestContext): Promise<Response | null> {
   if (context.url.pathname.toLowerCase() !== '/locations') return null;
-  const actual = readAuthCookie(context.request);
-  const expected = await createAuthToken(
+  const actual = readLegacyAuthCookie(context.request);
+  const expected = await createLegacyAuthToken(
     context.userAgent,
     context.encryptionKey,
     context.adminPassword,

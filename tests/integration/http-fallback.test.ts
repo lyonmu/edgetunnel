@@ -1,7 +1,7 @@
 import { createExecutionContext, env } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index';
-import { createAuthToken } from '../../src/auth/session';
+import { createLegacyAuthToken } from '../../src/auth/legacy-session';
 import { md5Twice } from '../../src/shared/hash';
 
 const uuid = '90cd4a77-141a-43c9-991b-08263cfe9c10';
@@ -36,7 +36,7 @@ describe('pure Worker HTTP fallback routes', () => {
 
   it('proxies authenticated /locations requests', async () => {
     const userAgent = 'route-test';
-    const token = await createAuthToken(userAgent, key, admin);
+    const token = await createLegacyAuthToken(userAgent, key, admin);
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify([{ iata: 'SJC' }]), {

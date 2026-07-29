@@ -249,9 +249,12 @@ git commit -m "feat(security): 加密存储代理凭据"
 **Files:**
 
 - Modify: `src/auth/session.ts`
+- Create: `src/auth/legacy-session.ts`
 - Create: `src/auth/subscription-token.ts`
-- Delete: `src/shared/hash.ts`
+- Modify: `src/admin/routes.ts`
+- Modify: `src/app/response.ts`
 - Modify: `tests/integration/admin.test.ts`
+- Modify: `tests/integration/http-fallback.test.ts`
 - Test: `tests/unit/session.test.ts`
 - Test: `tests/unit/subscription-token.test.ts`
 
@@ -264,16 +267,16 @@ git commit -m "feat(security): 加密存储代理凭据"
 - Produces: `createSubscriptionToken(adminSecret, uuid): Promise<string>`
 - Produces: `verifySubscriptionToken(candidate, adminSecret, uuid): Promise<boolean>`
 
-- [ ] **Step 1: 写会话失败测试**
+- [x] **Step 1: 写会话失败测试**
 
 验证版本、8 小时 TTL、未来签发时间、篡改、错误 Secret、Cookie 的
 `Secure; HttpOnly; SameSite=Strict; Path=/`。
 
-- [ ] **Step 2: 写订阅 token 失败测试**
+- [x] **Step 2: 写订阅 token 失败测试**
 
 验证 token 不等于 UUID/ADMIN/MD5，输入相同结果稳定，错误 token 和长度不同均返回 false。
 
-- [ ] **Step 3: 运行测试确认旧 MD5 实现失败**
+- [x] **Step 3: 运行测试确认旧 MD5 实现失败**
 
 Run:
 
@@ -281,18 +284,20 @@ Run:
 npx vitest run --config vitest.config.ts tests/unit/session.test.ts tests/unit/subscription-token.test.ts
 ```
 
-- [ ] **Step 4: 实现并迁移管理认证调用**
+- [x] **Step 4: 实现新认证并隔离旧调用**
 
 令牌 payload 使用 `v1.<iat>.<exp>.<nonce>`，签名附加为 base64url；验证先检查格式和时间，再比较
-签名。移除 User-Agent 绑定，避免浏览器升级导致无意义退出。
+签名。移除 User-Agent 绑定，避免浏览器升级导致无意义退出。旧管理路由和快速响应在 Task 6 完成前
+改用显式 `legacy-session.ts`，新 `session.ts` 不再暴露 MD5 API；`src/shared/hash.ts` 随 legacy
+调用一同在 Task 13 删除。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```bash
 npx vitest run --config vitest.config.ts tests/unit/session.test.ts tests/unit/subscription-token.test.ts tests/integration/admin.test.ts
 npm run typecheck
 git diff --check
-git add src/auth src/shared/hash.ts tests/unit/session.test.ts tests/unit/subscription-token.test.ts tests/integration/admin.test.ts
+git add src/auth src/admin/routes.ts src/app/response.ts tests/unit/session.test.ts tests/unit/subscription-token.test.ts tests/integration/admin.test.ts tests/integration/http-fallback.test.ts
 git commit -m "feat(auth): 使用 HMAC 保护管理会话"
 ```
 
