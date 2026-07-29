@@ -1,4 +1,5 @@
 export const LOG_STORE_KEY = 'edgetunnel:logs:v1';
+export const LOG_STORE_PREFIX = `${LOG_STORE_KEY}:`;
 const SENSITIVE_KEY = /password|token|cookie|authorization|uuid|secret|credential/i;
 const MAX_DETAIL_LENGTH = 512;
 
@@ -61,25 +62,49 @@ export class LogRepository {
     private readonly kv: KVNamespace,
     retention = 100,
   ) {
-    this.retention = Math.max(0, Math.min(1_000, Math.floor(retention)));
+    this.retention = Math.max(0, Math.min(100, Math.floor(retention)));
   }
 
   async read(): Promise<SecurityEvent[]> {
-    const text = await this.kv.get(LOG_STORE_KEY);
-    if (!text) return [];
+    if (this.retention === 0) return [];
+    const listed = await this.kv.list({ prefix: LOG_STORE_PREFIX, limit: 1_000 });
+    const current = (
+      await Promise.all(
+        listed.keys.slice(-this.retention).map(async ({ name }) => {
+          const text = await this.kv.get(name);
+          if (!text) return null;
+          try {
+            const value: unknown = JSON.parse(text);
+            return isSecurityEvent(value) ? value : null;
+          } catch {
+            return null;
+          }
+        }),
+      )
+    ).filter((event): event is SecurityEvent => event !== null);
+    const legacyText = await this.kv.get(LOG_STORE_KEY);
+    if (!legacyText) return current.slice(-this.retention);
     try {
-      const value: unknown = JSON.parse(text);
-      return Array.isArray(value) ? value.filter(isSecurityEvent).slice(-this.retention) : [];
+      const value: unknown = JSON.parse(legacyText);
+      const legacy = Array.isArray(value) ? value.filter(isSecurityEvent) : [];
+      return [...legacy, ...current]
+        .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+        .slice(-this.retention);
     } catch {
-      return [];
+      return current.slice(-this.retention);
     }
   }
 
   async append(event: SecurityEvent): Promise<void> {
     if (this.retention === 0) return;
     const sanitized = sanitize(event) as SecurityEvent;
-    const events = [...(await this.read()), sanitized].slice(-this.retention);
-    await this.kv.put(LOG_STORE_KEY, JSON.stringify(events));
+    const key = `${LOG_STORE_PREFIX}${sanitized.timestamp}:${sanitized.id}`;
+    await this.kv.put(key, JSON.stringify(sanitized));
+    const listed = await this.kv.list({ prefix: LOG_STORE_PREFIX, limit: 1_000 });
+    const overflow = listed.keys.length - this.retention;
+    if (overflow > 0) {
+      await Promise.all(listed.keys.slice(0, overflow).map(({ name }) => this.kv.delete(name)));
+    }
   }
 
   async appendSafely(event: SecurityEvent): Promise<boolean> {
@@ -92,6 +117,10 @@ export class LogRepository {
   }
 
   async clear(): Promise<void> {
-    await this.kv.delete(LOG_STORE_KEY);
+    const listed = await this.kv.list({ prefix: LOG_STORE_PREFIX, limit: 1_000 });
+    await Promise.all([
+      this.kv.delete(LOG_STORE_KEY),
+      ...listed.keys.map(({ name }) => this.kv.delete(name)),
+    ]);
   }
 }

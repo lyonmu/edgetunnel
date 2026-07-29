@@ -4,7 +4,7 @@ import worker from '../../src/index';
 import { CONFIG_KEY } from '../../src/config/repository';
 import { SECRET_STORE_KEY } from '../../src/security/secret-store';
 import { encodeBase64Url } from '../../src/security/crypto';
-import { LOG_STORE_KEY } from '../../src/storage/log-repository';
+import { LogRepository } from '../../src/storage/log-repository';
 
 const uuid = '90cd4a77-141a-43c9-991b-08263cfe9c10';
 const origin = 'https://example.com';
@@ -38,9 +38,10 @@ async function loginCookie(): Promise<string> {
 
 describe('versioned admin API', () => {
   beforeEach(async () => {
-    await Promise.all(
-      [CONFIG_KEY, SECRET_STORE_KEY, LOG_STORE_KEY, 'config.json'].map((key) => env.KV.delete(key)),
-    );
+    await Promise.all([
+      ...[CONFIG_KEY, SECRET_STORE_KEY, 'config.json'].map((key) => env.KV.delete(key)),
+      new LogRepository(env.KV).clear(),
+    ]);
   });
 
   it('does not route an admin POST into XHTTP', async () => {
@@ -86,11 +87,7 @@ describe('versioned admin API', () => {
     await waitOnExecutionContext(execution);
 
     expect(response.status).toBe(401);
-    const logs = JSON.parse((await env.KV.get(LOG_STORE_KEY)) ?? '[]') as Array<{
-      type: string;
-      outcome: string;
-      details: { clientIp: string };
-    }>;
+    const logs = await new LogRepository(env.KV).read();
     expect(logs).toContainEqual(
       expect.objectContaining({
         type: 'admin_login',

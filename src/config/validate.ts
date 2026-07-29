@@ -424,7 +424,7 @@ function validateObservability(value: unknown, issues: ConfigIssue[]): void {
   const observability = expectRecord(value, path, ['logLevel', 'retention'], issues);
   if (!observability) return;
   expectEnum(observability.logLevel, `${path}/logLevel`, ['off', 'error', 'info'], issues);
-  expectInteger(observability.retention, `${path}/retention`, issues, 0, 1_000);
+  expectInteger(observability.retention, `${path}/retention`, issues, 0, 100);
 }
 
 export function parseWorkerConfig(value: unknown): WorkerConfigV1 {

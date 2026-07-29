@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { LOG_STORE_KEY, LogRepository, type SecurityEvent } from '../../src/storage/log-repository';
+import {
+  LOG_STORE_PREFIX,
+  LogRepository,
+  type SecurityEvent,
+} from '../../src/storage/log-repository';
 
 class MemoryKv {
   readonly values = new Map<string, string>();
@@ -16,6 +20,15 @@ class MemoryKv {
 
   async delete(key: string): Promise<void> {
     this.values.delete(key);
+  }
+
+  async list(options: { prefix?: string; limit?: number }) {
+    const keys = [...this.values.keys()]
+      .filter((key) => key.startsWith(options.prefix ?? ''))
+      .sort()
+      .slice(0, options.limit)
+      .map((name) => ({ name }));
+    return { keys, list_complete: true, cacheStatus: null };
   }
 
   namespace(): KVNamespace {
@@ -50,7 +63,10 @@ describe('LogRepository', () => {
 
     const logs = await repository.read();
     expect(logs.map((item) => item.id)).toEqual(['event-2', 'event-3']);
-    const persisted = kv.values.get(LOG_STORE_KEY) ?? '';
+    const persisted = [...kv.values.entries()]
+      .filter(([key]) => key.startsWith(LOG_STORE_PREFIX))
+      .map(([, value]) => value)
+      .join('');
     expect(persisted).not.toContain('must-not-leak');
     expect(persisted).not.toContain('203.0.113.42');
     expect(persisted).toContain('203.0.113.0/24');
@@ -74,5 +90,15 @@ describe('LogRepository', () => {
     const repository = new LogRepository(kv.namespace(), 10);
 
     await expect(repository.appendSafely(event(1))).resolves.toBe(false);
+  });
+
+  it('stores concurrent events under independent KV keys', async () => {
+    const kv = new MemoryKv();
+    const repository = new LogRepository(kv.namespace(), 10);
+
+    await Promise.all([repository.append(event(1)), repository.append(event(2))]);
+
+    expect([...kv.values.keys()].filter((key) => key.startsWith(LOG_STORE_PREFIX))).toHaveLength(2);
+    expect((await repository.read()).map((item) => item.id)).toEqual(['event-1', 'event-2']);
   });
 });
