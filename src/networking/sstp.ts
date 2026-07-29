@@ -147,6 +147,7 @@ export async function sstpConnect(
   let socket: Socket | null = null;
   let reader: Reader | null = null;
   let writer: Writer | null = null;
+  let closing = false;
   let closedSettled = false;
   let resolveClosed!: () => void;
   let rejectClosed!: (reason?: unknown) => void;
@@ -160,6 +161,7 @@ export async function sstpConnect(
     settle(value);
   };
   const close = async () => {
+    closing = true;
     try {
       await reader?.cancel();
     } catch {
@@ -573,6 +575,10 @@ export async function sstpConnect(
           if (bufferedBytes.byteLength < 4 || pendingLength >= 32_768) flush();
         }
       } catch (error) {
+        if (closing) {
+          settleClosed(resolveClosed);
+          return;
+        }
         try {
           activeStreamController().error(error);
         } catch {

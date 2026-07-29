@@ -9,6 +9,7 @@ export default defineConfig({
     }),
   ],
   test: {
+    exclude: ['tests/integration/connectors/**/*.test.ts'],
     include: [
       'tests/unit/**/*.test.ts',
       'tests/integration/**/*.test.ts',

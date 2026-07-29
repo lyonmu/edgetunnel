@@ -718,19 +718,19 @@ git commit -m "feat(admin): 重建独立 Worker 后台"
 - Produces: 可脚本化 TCP/TLS fixture，支持分片写、延迟、认证拒绝和提前关闭
 - Consumes: Task 7 connector adapters
 
-- [ ] **Step 1: 建立仅绑定 loopback 的 fixture**
+- [x] **Step 1: 建立仅绑定 loopback 的 fixture**
 
 fixture 返回随机端口和 `close()`；测试结束必须清理；不得监听公网地址或使用真实凭据。
 
-- [ ] **Step 2: 为五类链式代理写成功测试**
+- [x] **Step 2: 为五类链式代理写成功测试**
 
 逐字节验证握手、认证、CONNECT/relay 目标和首包转发，响应拆为多个任意边界 chunk。
 
-- [ ] **Step 3: 为五类连接器写失败测试**
+- [x] **Step 3: 为五类连接器写失败测试**
 
 覆盖认证拒绝、响应超长、协议字段非法、超时和服务端提前关闭；错误消息不得包含用户名或密码。
 
-- [ ] **Step 4: 运行集成测试并修复 adapter 边界**
+- [x] **Step 4: 运行集成测试并修复 adapter 边界**
 
 Run:
 
@@ -740,7 +740,7 @@ npx vitest run --config vitest.node.config.ts tests/integration/connectors
 
 Expected: 全部通过；只允许修改 connector adapter 和确有缺陷的现有协议实现，不重写 TLS/TURN/SSTP。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```bash
 npx vitest run --config vitest.node.config.ts tests/integration/connectors

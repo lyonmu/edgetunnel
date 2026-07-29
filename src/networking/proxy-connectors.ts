@@ -89,17 +89,26 @@ export async function socks5Connect(
   const socket = connector.connect({ hostname, port });
   const writer = socket.writable.getWriter();
   const reader = socket.readable.getReader();
+  let pending = new Uint8Array(0);
+  const readExact = async (length: number): Promise<Uint8Array> => {
+    while (pending.byteLength < length) {
+      const response = await reader.read();
+      if (response.done || !response.value) throw new Error('S5 response is truncated');
+      pending = new Uint8Array([...pending, ...response.value]);
+    }
+    const value = pending.slice(0, length);
+    pending = pending.slice(length);
+    return value;
+  };
   try {
     const authMethods =
       username && password
         ? new Uint8Array([0x05, 0x02, 0x00, 0x02])
         : new Uint8Array([0x05, 0x01, 0x00]);
     await writer.write(authMethods);
-    let response = await reader.read();
-    if (response.done || response.value.byteLength < 2)
-      throw new Error('S5 method selection failed');
-
-    const selectedMethod = new Uint8Array(response.value)[1];
+    let response = await readExact(2);
+    if (response[0] !== 0x05) throw new Error('S5 method selection failed');
+    const selectedMethod = response[1];
     if (selectedMethod === 0x02) {
       if (!username || !password) throw new Error('S5 requires authentication');
       const userBytes = new TextEncoder().encode(username);
@@ -112,9 +121,8 @@ export async function socks5Connect(
         ...passBytes,
       ]);
       await writer.write(authPacket);
-      response = await reader.read();
-      if (response.done || new Uint8Array(response.value)[1] !== 0x00)
-        throw new Error('S5 authentication failed');
+      response = await readExact(2);
+      if (response[0] !== 0x01 || response[1] !== 0x00) throw new Error('S5 authentication failed');
     } else if (selectedMethod !== 0x00) {
       throw new Error(`S5 unsupported auth method: ${selectedMethod}`);
     }
@@ -131,13 +139,38 @@ export async function socks5Connect(
       targetPort & 0xff,
     ]);
     await writer.write(connectPacket);
-    response = await reader.read();
-    if (response.done || new Uint8Array(response.value)[1] !== 0x00)
-      throw new Error('S5 connection failed');
+    response = await readExact(4);
+    if (response[0] !== 0x05 || response[1] !== 0x00) throw new Error('S5 connection failed');
+    if (response[3] === 0x01) {
+      await readExact(6);
+    } else if (response[3] === 0x03) {
+      const domainLength = (await readExact(1))[0] ?? 0;
+      await readExact(domainLength + 2);
+    } else if (response[3] === 0x04) {
+      await readExact(18);
+    } else {
+      throw new Error('S5 connection response has an invalid address type');
+    }
 
     if (initialData && initialData.byteLength > 0) await writer.write(initialData);
     writer.releaseLock();
     reader.releaseLock();
+    if (pending.byteLength) {
+      const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+      const transformWriter = writable.getWriter();
+      void transformWriter
+        .write(pending)
+        .finally(() => transformWriter.releaseLock())
+        .then(() => socket.readable.pipeTo(writable))
+        .catch(() => undefined);
+      return {
+        readable,
+        writable: socket.writable,
+        opened: socket.opened,
+        closed: socket.closed,
+        close: () => socket.close(),
+      } as Socket;
+    }
     return socket;
   } catch (error) {
     try {
@@ -227,9 +260,11 @@ export async function httpConnect(
     if (bytesRead > headerEndIndex) {
       const { readable, writable } = new TransformStream();
       const transformWriter = writable.getWriter();
-      await transformWriter.write(responseBuffer.subarray(headerEndIndex, bytesRead));
-      transformWriter.releaseLock();
-      socket.readable.pipeTo(writable).catch(() => {});
+      void transformWriter
+        .write(responseBuffer.subarray(headerEndIndex, bytesRead))
+        .finally(() => transformWriter.releaseLock())
+        .then(() => socket.readable.pipeTo(writable))
+        .catch(() => undefined);
       return {
         readable,
         writable: socket.writable,
@@ -266,6 +301,12 @@ export async function httpsConnect(
   proxyAddr: ProxyAddress,
   connector: SocketConnector,
 ): Promise<Socket> {
+  try {
+    return await httpConnect(targetHost, targetPort, initialData, proxyAddr, connector, true);
+  } catch (error) {
+    if (!/secureTransport.+(?:unsupported|not implemented)/i.test(String(error))) throw error;
+    // 非 Cloudflare 测试适配器可显式声明不支持 secureTransport，再回退到旧 TLS 客户端。
+  }
   const { username, password, hostname, port } = proxyAddr;
   const tlsServerName = isIPHostname(hostname) ? '' : stripIPv6Brackets(hostname);
   const encoder = new TextEncoder();
