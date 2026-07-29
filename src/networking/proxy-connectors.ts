@@ -1,4 +1,4 @@
-import type { ProxyAddress } from '../app/types';
+import type { ProxyAddress } from './connectors/types';
 import { TlsClient } from './tls';
 
 export function parseSocks5Address(address: string, defaultPort: number): ProxyAddress {

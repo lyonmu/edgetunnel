@@ -4,8 +4,7 @@ import { describe, expect, it } from 'vitest';
 describe('admin assets', () => {
   it.each([
     ['/login', 'EdgeTunnel'],
-    ['/noADMIN', 'ADMIN'],
-    ['/noKV', 'KV'],
+    ['/admin', 'EdgeTunnel'],
   ])('serves %s from local assets', async (path, marker) => {
     const response = await env.ASSETS.fetch(new Request(`https://example.com${path}`));
 

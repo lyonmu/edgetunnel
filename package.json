@@ -14,7 +14,7 @@
     "check": "npm run types && npm run typecheck && npm run test && npm run lint && npm run format:check && npm run build"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.16.18",
+    "@cloudflare/vitest-pool-workers": "^0.18.8",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.0.0",
     "eslint": "^10.5.0",
@@ -23,6 +23,6 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.62.0",
     "vitest": "^4.1.9",
-    "wrangler": "^4.103.0"
+    "wrangler": "^4.114.0"
   }
 }

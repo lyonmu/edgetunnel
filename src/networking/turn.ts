@@ -1,4 +1,4 @@
-import type { ProxyAddress } from '../app/types';
+import type { ProxyAddress } from './connectors/types';
 import { concatBytes } from '../shared/bytes';
 import { resolveDns, type DnsAnswer } from './dns';
 import { isIPv4, stripIPv6Brackets } from './proxy-connectors';

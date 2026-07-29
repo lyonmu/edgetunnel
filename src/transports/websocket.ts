@@ -8,8 +8,8 @@ import {
   createRemoteWriterProvider,
   type TransportBridge,
 } from './bridge';
-import type { ConnectTCPFn } from '../networking/tcp-connector';
-import type { RequestContext } from '../app/types';
+import type { ConnectTCPFn } from './session';
+import type { DataPlaneContext } from '../app/types';
 import {
   createShadowsocksDecryptor,
   createShadowsocksEncryptor,
@@ -28,7 +28,7 @@ interface HalfOpenWebSocket extends WebSocket {
 
 export function handleWebSocket(
   request: Request,
-  ctx: RequestContext,
+  ctx: DataPlaneContext,
   connectTCP: ConnectTCPFn,
   createDnsSession: typeof createDnsUdpSession = createDnsUdpSession,
 ): Response {
@@ -72,17 +72,16 @@ export function handleWebSocket(
     : createWebSocketBridge(serverSock);
   const firstPacketReader = createFirstPacketReader(
     ctx.userId,
-    ctx.runtimeSnapshot?.secrets.trojanPassword,
+    ctx.runtimeSnapshot.secrets.trojanPassword,
   );
   if (
     shadowsocksMethod &&
-    ctx.runtimeSnapshot &&
     (!ctx.runtimeSnapshot.config.inbound.shadowsocks.enabled ||
       shadowsocksMethod !== ctx.runtimeSnapshot.config.inbound.shadowsocks.method)
   ) {
     return new Response('Shadowsocks is not enabled', { status: 404 });
   }
-  const shadowsocksPassword = ctx.runtimeSnapshot?.secrets.shadowsocksPassword ?? ctx.userId;
+  const shadowsocksPassword = ctx.runtimeSnapshot.secrets.shadowsocksPassword ?? ctx.userId;
   const shadowsocksDecryptor = shadowsocksMethod
     ? createShadowsocksDecryptor(shadowsocksPassword, shadowsocksMethod)
     : null;
@@ -127,10 +126,7 @@ export function handleWebSocket(
       if (result.status === 'need_more') return;
       if (result.status === 'invalid') throw new Error('Invalid first packet');
       const firstPacket = result.packet;
-      if (
-        ctx.runtimeSnapshot &&
-        !ctx.runtimeSnapshot.config.inbound[firstPacket.protocol].enabled
-      ) {
+      if (!ctx.runtimeSnapshot.config.inbound[firstPacket.protocol].enabled) {
         throw new Error(`${firstPacket.protocol} is not enabled`);
       }
       firstPacketHandled = true;

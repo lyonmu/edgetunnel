@@ -1,28 +1,35 @@
 import { createExecutionContext, env } from 'cloudflare:test';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index';
-import { createLegacyAuthToken } from '../../src/auth/legacy-session';
-import { md5Twice } from '../../src/shared/hash';
+import { createDefaultConfig } from '../../src/config/defaults';
+import { CONFIG_KEY } from '../../src/config/repository';
+import { encodeBase64Url } from '../../src/security/crypto';
 
 const uuid = '90cd4a77-141a-43c9-991b-08263cfe9c10';
 const admin = 'admin';
-const key = 'test-key';
+const configEncryptionKey = encodeBase64Url(Uint8Array.from({ length: 32 }, (_, index) => index));
 const baseEnv = {
   KV: env.KV,
   ASSETS: env.ASSETS,
   ADMIN: admin,
   UUID: uuid,
-  KEY: key,
+  CONFIG_KEY: configEncryptionKey,
+  TROJAN_PASSWORD: 'trojan',
+  SHADOWSOCKS_PASSWORD: 'shadowsocks',
 };
+
+beforeEach(async () => {
+  await env.KV.delete(CONFIG_KEY);
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('pure Worker HTTP fallback routes', () => {
-  it('serves /version before WebSocket routing when the identifier matches', async () => {
+  it('serves /version before WebSocket routing', async () => {
     const response = await worker.fetch(
-      new Request(`https://example.com/version?uuid=${uuid}`, {
+      new Request('https://example.com/version', {
         headers: { Upgrade: 'websocket' },
       }),
       baseEnv,
@@ -34,46 +41,10 @@ describe('pure Worker HTTP fallback routes', () => {
     expect(response.webSocket).toBeNull();
   });
 
-  it('proxies authenticated /locations requests', async () => {
-    const userAgent = 'route-test';
-    const token = await createLegacyAuthToken(userAgent, key, admin);
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify([{ iata: 'SJC' }]), {
-          headers: { 'Content-Type': 'application/json' },
-        }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    const response = await worker.fetch(
-      new Request('https://example.com/locations', {
-        headers: { Cookie: `auth=${token}`, 'User-Agent': userAgent },
-      }),
-      baseEnv,
-      createExecutionContext(),
-    );
-
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.objectContaining({ url: 'https://speed.cloudflare.com/locations' }),
-    );
-  });
-
-  it('redirects the configured quick subscription path with a valid token', async () => {
-    const response = await worker.fetch(
-      new Request(`https://example.com/${key}?clash=1`),
-      baseEnv,
-      createExecutionContext(),
-    );
-
-    expect(response.status).toBe(302);
-    const location = response.headers.get('Location')!;
-    expect(location).toContain('/sub?');
-    expect(location).toContain(`token=${await md5Twice(`example.com${uuid}`)}`);
-    expect(location).toContain('clash=1');
-  });
-
-  it('rewrites textual camouflage responses back to the Worker host', async () => {
+  it('streams the configured camouflage response', async () => {
+    const config = createDefaultConfig();
+    config.site.camouflageUrl = 'https://origin.example';
+    await env.KV.put(CONFIG_KEY, JSON.stringify(config));
     const fetchMock = vi.fn(
       async () =>
         new Response('<a href="https://origin.example/path">origin.example</a>', {
@@ -84,14 +55,16 @@ describe('pure Worker HTTP fallback routes', () => {
 
     const response = await worker.fetch(
       new Request('https://worker.example/path?q=1'),
-      { ...baseEnv, URL: 'origin.example' },
+      baseEnv,
       createExecutionContext(),
     );
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain('worker.example');
+    expect(await response.text()).toContain('origin.example');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
-    expect(response.headers.has('Content-Length')).toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://origin.example/path?q=1' }),
+    );
   });
 
   it('uses the local nginx page when camouflage is not configured', async () => {
@@ -109,11 +82,14 @@ describe('pure Worker HTTP fallback routes', () => {
     const response = await worker.fetch(
       new Request('https://example.com/api/admin/v1/config'),
       {
+        KV: undefined!,
         ASSETS: env.ASSETS,
         ADMIN: admin,
         UUID: uuid,
         CONFIG_KEY: 'not-used-without-kv',
-      } as Env,
+        TROJAN_PASSWORD: 'trojan',
+        SHADOWSOCKS_PASSWORD: 'shadowsocks',
+      },
       createExecutionContext(),
     );
 

@@ -3,8 +3,6 @@ import type { RequestContext } from '../app/types';
 const ASSET_PATHS = {
   '/admin': '/admin/',
   '/login': '/login/',
-  '/noADMIN': '/noADMIN/',
-  '/noKV': '/noKV/',
 } as const;
 
 export function fetchAdminAsset(

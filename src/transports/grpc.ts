@@ -6,8 +6,8 @@ import {
   createRemoteWriterProvider,
   type TransportBridge,
 } from './bridge';
-import type { ConnectTCPFn } from '../networking/tcp-connector';
-import type { RequestContext } from '../app/types';
+import type { ConnectTCPFn } from './session';
+import type { DataPlaneContext } from '../app/types';
 import {
   createDnsUdpSession,
   isVlessPacketAddrTarget,
@@ -16,7 +16,7 @@ import {
 
 export function handleGRPC(
   request: Request,
-  ctx: RequestContext,
+  ctx: DataPlaneContext,
   connectTCP: ConnectTCPFn,
   createDnsSession: typeof createDnsUdpSession = createDnsUdpSession,
 ): Response {
@@ -68,7 +68,7 @@ export function handleGRPC(
           let isFirstFrame = true;
           const firstPacketReader = createFirstPacketReader(
             ctx.userId,
-            ctx.runtimeSnapshot?.secrets.trojanPassword,
+            ctx.runtimeSnapshot.secrets.trojanPassword,
           );
           let dnsSession: ReturnType<typeof createDnsUdpSession> | null = null;
 
@@ -102,10 +102,7 @@ export function handleGRPC(
                 if (result.status === 'invalid') throw new Error('Invalid first packet');
                 isFirstFrame = false;
                 const firstPacket = result.packet;
-                if (
-                  ctx.runtimeSnapshot &&
-                  !ctx.runtimeSnapshot.config.inbound[firstPacket.protocol].enabled
-                ) {
+                if (!ctx.runtimeSnapshot.config.inbound[firstPacket.protocol].enabled) {
                   throw new Error(`${firstPacket.protocol} is not enabled`);
                 }
 

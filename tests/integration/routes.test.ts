@@ -13,6 +13,8 @@ const adminEnv = {
   ADMIN: 'admin',
   UUID: uuid,
   CONFIG_KEY: configEncryptionKey,
+  TROJAN_PASSWORD: 'trojan',
+  SHADOWSOCKS_PASSWORD: 'shadowsocks',
 };
 
 describe('route priority', () => {
@@ -35,14 +37,29 @@ describe('route priority', () => {
     });
   });
 
-  describe('missing ADMIN password', () => {
-    it('returns 404 noADMIN page when ADMIN is empty', async () => {
+  describe('missing runtime secrets', () => {
+    it('keeps public fallback free of secret names', async () => {
       const req = new Request('https://example.com/anything', {
         cf: { country: 'US', colo: 'SJC', asn: 13335 },
       });
       const ctx = createExecutionContext();
-      const res = await worker.fetch(req, { KV: env.KV, ASSETS: env.ASSETS }, ctx);
-      expect(res.status).toBe(404);
+      const res = await worker.fetch(
+        req,
+        {
+          KV: env.KV,
+          ASSETS: env.ASSETS,
+          ADMIN: undefined!,
+          UUID: undefined!,
+          CONFIG_KEY: undefined!,
+          TROJAN_PASSWORD: undefined!,
+          SHADOWSOCKS_PASSWORD: undefined!,
+        },
+        ctx,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('Welcome to nginx!');
+      expect(body).not.toContain('ADMIN');
     });
   });
 
@@ -154,9 +171,9 @@ describe('route priority', () => {
     });
   });
 
-  describe('legacy fallback', () => {
-    it('unhandled GET falls through to legacy worker', async () => {
-      const req = new Request('https://example.com/version?uuid=' + uuid, {
+  describe('version endpoint', () => {
+    it('serves the pure Worker version without exposing identity', async () => {
+      const req = new Request('https://example.com/version', {
         cf: { country: 'US', colo: 'SJC', asn: 13335 },
       });
       const ctx = createExecutionContext();

@@ -2,49 +2,48 @@ import { createExecutionContext, env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createRequestContext } from '../../src/app/request-context';
 
-const uuid = '90cd4a77-141a-43c9-991b-08263cfe9c10';
-
-function createEnv(overrides: Partial<Env> = {}): Env {
+function createEnv(): Env {
   return {
     KV: env.KV,
     ASSETS: env.ASSETS,
     ADMIN: 'admin',
-    UUID: uuid,
-    ...overrides,
+    UUID: '90cd4a77-141a-43c9-991b-08263cfe9c10',
+    CONFIG_KEY: 'test',
+    TROJAN_PASSWORD: 'trojan',
+    SHADOWSOCKS_PASSWORD: 'shadowsocks',
   };
 }
 
 describe('createRequestContext', () => {
-  it('keeps carrier-specific dial concurrency request-local', async () => {
-    const cmccRequest = new Request('https://example.com/', {
-      cf: { country: 'CN', asn: 9808, colo: 'HKG' },
+  it('creates canonical request-local metadata without legacy parsing', () => {
+    const request = new Request('https://example.com/path?proxyip=ignored', {
+      headers: {
+        'CF-Connecting-IP': '203.0.113.8',
+        'User-Agent': 'metadata-test',
+      },
     });
-    const normalRequest = new Request('https://example.com/', {
-      cf: { country: 'US', asn: 13335, colo: 'SJC' },
-    });
+    const context = createRequestContext(request, createEnv(), createExecutionContext());
 
-    const cmcc = await createRequestContext(cmccRequest, createEnv(), createExecutionContext());
-    const normal = await createRequestContext(normalRequest, createEnv(), createExecutionContext());
-
-    expect(cmcc.dialConcurrency).toBe(1);
-    expect(normal.dialConcurrency).toBe(2);
+    expect(context.request).toBe(request);
+    expect(context.url.pathname).toBe('/path');
+    expect(context.clientIp).toBe('203.0.113.8');
+    expect(context.userAgent).toBe('metadata-test');
+    expect(context.requestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(context).not.toHaveProperty('proxy');
+    expect(context).not.toHaveProperty('adminPassword');
   });
 
-  it('does not persist feature flags between requests', async () => {
-    const enabled = await createRequestContext(
-      new Request('https://example.com/'),
-      createEnv({ DEBUG: 'true', PRELOAD_RACE_DIAL: '1' }),
-      createExecutionContext(),
-    );
-    const disabled = await createRequestContext(
-      new Request('https://example.com/'),
-      createEnv({ DEBUG: '', PRELOAD_RACE_DIAL: '' }),
-      createExecutionContext(),
+  it('creates a unique request ID for concurrent requests', async () => {
+    const contexts = await Promise.all(
+      Array.from({ length: 20 }, async () =>
+        createRequestContext(
+          new Request('https://example.com/'),
+          createEnv(),
+          createExecutionContext(),
+        ),
+      ),
     );
 
-    expect(enabled.debug).toBe(true);
-    expect(enabled.preloadRaceDial).toBe(true);
-    expect(disabled.debug).toBe(false);
-    expect(disabled.preloadRaceDial).toBe(false);
+    expect(new Set(contexts.map((context) => context.requestId))).toHaveLength(20);
   });
 });

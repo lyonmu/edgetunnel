@@ -6,8 +6,8 @@ import {
   createRemoteConnWrapper,
   createRemoteWriterProvider,
 } from './bridge';
-import type { ConnectTCPFn } from '../networking/tcp-connector';
-import type { RequestContext } from '../app/types';
+import type { ConnectTCPFn } from './session';
+import type { DataPlaneContext } from '../app/types';
 import {
   createDnsUdpSession,
   isVlessPacketAddrTarget,
@@ -16,7 +16,7 @@ import {
 
 export function handleXHTTP(
   request: Request,
-  ctx: RequestContext,
+  ctx: DataPlaneContext,
   connectTCP: ConnectTCPFn,
   createDnsSession: typeof createDnsUdpSession = createDnsUdpSession,
 ): Response {
@@ -64,7 +64,7 @@ export function handleXHTTP(
         try {
           const firstPacketReader = createFirstPacketReader(
             ctx.userId,
-            ctx.runtimeSnapshot?.secrets.trojanPassword,
+            ctx.runtimeSnapshot.secrets.trojanPassword,
           );
           let firstPacket = null;
           while (!firstPacket) {
@@ -82,10 +82,7 @@ export function handleXHTTP(
             if (result.status === 'ok') firstPacket = result.packet;
           }
 
-          if (
-            ctx.runtimeSnapshot &&
-            !ctx.runtimeSnapshot.config.inbound[firstPacket.protocol].enabled
-          ) {
+          if (!ctx.runtimeSnapshot.config.inbound[firstPacket.protocol].enabled) {
             throw new Error(`${firstPacket.protocol} is not enabled`);
           }
 

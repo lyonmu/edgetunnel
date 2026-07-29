@@ -2,7 +2,15 @@ import type { Dialer } from '../networking/dialer';
 import { connectStreams } from '../networking/stream-pump';
 import type { InboundProtocol } from '../config/schema';
 import type { RemoteConnWrapper, TransportBridge } from './bridge';
-import type { ConnectTCPFn } from '../networking/tcp-connector';
+
+export type ConnectTCPFn = (
+  hostname: string,
+  port: number,
+  data: Uint8Array | null,
+  bridge: TransportBridge,
+  wrapper: RemoteConnWrapper,
+  inbound?: InboundProtocol,
+) => Promise<void>;
 
 export class ConnectionScope {
   private readonly controller = new AbortController();

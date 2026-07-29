@@ -779,30 +779,30 @@ git commit -m "test(network): 验证全部链式代理连接器"
 
 - Produces: 只从 `src/index.ts` 构建的纯 Worker 工程
 
-- [ ] **Step 1: 写遗留扫描测试**
+- [x] **Step 1: 写遗留扫描测试**
 
 在 `tests/unit/no-legacy.test.ts` 扫描 `src/`、`public/`、`package.json` 和 `wrangler.jsonc`，断言不含
 `config.json`、`migrateStoredConfig`、`md5Twice`、`SUBAPI`、`GO2SOCKS5`、旧 env alias 和 URL
 credential parser。
 
-- [ ] **Step 2: 运行测试确认当前失败**
+- [x] **Step 2: 运行测试确认当前失败**
 
-Run: `npx vitest run --config vitest.config.ts tests/unit/no-legacy.test.ts`
+Run: `npx vitest run --config vitest.node.config.ts tests/unit/no-legacy.test.ts`
 
-- [ ] **Step 3: 删除遗留文件和脚本引用**
+- [x] **Step 3: 删除遗留文件和脚本引用**
 
 只删除本任务列出的兼容文件；保留现有 Pages 生产项目和远程资源不动。`package.json` 不再包含旧资产
 同步或迁移命令。
 
-- [ ] **Step 4: 更新路由缺失配置响应**
+- [x] **Step 4: 更新路由缺失配置响应**
 
 缺 ADMIN/UUID/CONFIG_KEY/KV 时 API 返回结构化 503；公共伪装页不暴露缺失变量名称；删除
 `/noADMIN`、`/noKV` 页面。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```bash
-npx vitest run --config vitest.config.ts tests/unit/no-legacy.test.ts
+npx vitest run --config vitest.node.config.ts tests/unit/no-legacy.test.ts
 npx vitest run --config vitest.config.ts tests/integration/routes.test.ts tests/integration/assets.test.ts
 npm run typecheck
 git diff --check

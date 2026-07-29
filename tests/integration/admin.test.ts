@@ -16,6 +16,8 @@ function testEnv(): Env {
     ADMIN: 'admin',
     UUID: uuid,
     CONFIG_KEY: configEncryptionKey,
+    TROJAN_PASSWORD: 'trojan',
+    SHADOWSOCKS_PASSWORD: 'shadowsocks',
   };
 }
 

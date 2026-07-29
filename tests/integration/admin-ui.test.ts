@@ -12,6 +12,8 @@ const runtimeEnv: Env = {
   ADMIN: 'admin',
   UUID: '90cd4a77-141a-43c9-991b-08263cfe9c10',
   CONFIG_KEY: encodeBase64Url(Uint8Array.from({ length: 32 }, (_, index) => index)),
+  TROJAN_PASSWORD: 'trojan',
+  SHADOWSOCKS_PASSWORD: 'shadowsocks',
 };
 
 async function fetchWorker(path: string, init?: RequestInit): Promise<Response> {

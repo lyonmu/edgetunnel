@@ -3,7 +3,7 @@ import promise from 'eslint-plugin-promise';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'public/**', '_worker.js', 'worker-configuration.d.ts'] },
+  { ignores: ['dist/**', 'public/**', 'worker-configuration.d.ts'] },
   js.configs.recommended,
   ...tseslint.configs.recommended.map((config) => ({
     ...config,

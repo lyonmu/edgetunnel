@@ -6,6 +6,13 @@ export interface DialTarget {
   port: number;
 }
 
+export interface ProxyAddress {
+  username?: string;
+  password?: string;
+  hostname: string;
+  port: number;
+}
+
 export interface Connector {
   connect(
     target: DialTarget,

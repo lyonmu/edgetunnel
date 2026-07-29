@@ -2,21 +2,21 @@ import { createExecutionContext, env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createRequestContext } from '../../src/app/request-context';
 
-const uuid = '90cd4a77-141a-43c9-991b-08263cfe9c10';
-
-function createEnv(overrides: Partial<Env> = {}): Env {
+function createEnv(): Env {
   return {
     KV: env.KV,
     ASSETS: env.ASSETS,
     ADMIN: 'admin',
-    UUID: uuid,
-    ...overrides,
+    UUID: '90cd4a77-141a-43c9-991b-08263cfe9c10',
+    CONFIG_KEY: 'test',
+    TROJAN_PASSWORD: 'trojan',
+    SHADOWSOCKS_PASSWORD: 'shadowsocks',
   };
 }
 
 describe('request state isolation', () => {
-  it('keeps concurrent proxy parameters isolated', async () => {
-    const [socks, proxyIp] = await Promise.all([
+  it('does not interpret URL proxy credentials as runtime state', async () => {
+    const [first, second] = await Promise.all([
       createRequestContext(
         new Request('https://example.com/?socks5=user%3Apass%40proxy.example%3A1080&globalproxy=1'),
         createEnv(),
@@ -29,24 +29,10 @@ describe('request state isolation', () => {
       ),
     ]);
 
-    expect(socks.proxy).toMatchObject({
-      type: 'socks5',
-      global: true,
-      fallback: true,
-      address: {
-        username: 'user',
-        password: 'pass',
-        hostname: 'proxy.example',
-        port: 1080,
-      },
-    });
-    expect(proxyIp.proxy).toMatchObject({
-      type: 'proxyip',
-      proxyIp: 'proxy-ip.example:443',
-      fallback: false,
-      global: false,
-    });
-    expect(socks.proxy).not.toBe(proxyIp.proxy);
-    expect(socks.proxy.whitelist).not.toBe(proxyIp.proxy.whitelist);
+    expect(first.url.searchParams.has('socks5')).toBe(true);
+    expect(second.url.searchParams.has('proxyip')).toBe(true);
+    expect(first).not.toHaveProperty('proxy');
+    expect(second).not.toHaveProperty('proxy');
+    expect(first.requestId).not.toBe(second.requestId);
   });
 });

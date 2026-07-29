@@ -1,32 +1,35 @@
 import { createExecutionContext, env } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
-import type { RequestContext } from '../../src/app/types';
+import type { DataPlaneContext } from '../../src/app/types';
+import { createDefaultConfig } from '../../src/config/defaults';
 import { handleXHTTP } from '../../src/transports/xhttp';
 import { createDnsUdpSession } from '../../src/networking/udp-dns';
 
 const uuid = '12345678-1234-4234-8234-123456789abc';
 
-function context(request: Request): RequestContext {
+function context(request: Request): DataPlaneContext {
   return {
     request,
-    env: { KV: env.KV, ASSETS: env.ASSETS, ADMIN: 'admin', UUID: uuid },
+    env: {
+      KV: env.KV,
+      ASSETS: env.ASSETS,
+      ADMIN: 'admin',
+      UUID: uuid,
+      CONFIG_KEY: 'key',
+      TROJAN_PASSWORD: 'trojan',
+      SHADOWSOCKS_PASSWORD: 'shadowsocks',
+    },
     execution: createExecutionContext(),
     url: new URL(request.url),
     userId: uuid,
-    host: 'example.com',
     clientIp: '127.0.0.1',
     userAgent: 'vitest',
-    adminPassword: 'admin',
-    encryptionKey: 'key',
-    debug: false,
-    preloadRaceDial: false,
-    dialConcurrency: 1,
-    proxy: {
-      type: 'proxyip',
-      proxyIp: 'proxy.example.com',
-      global: false,
-      fallback: true,
-      whitelist: [],
+    requestId: crypto.randomUUID(),
+    runtimeSnapshot: {
+      config: createDefaultConfig(),
+      secrets: { admin: 'admin', configKey: 'key' },
+      identity: { vlessUuid: uuid },
+      requestId: crypto.randomUUID(),
     },
   };
 }
