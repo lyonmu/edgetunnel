@@ -209,17 +209,17 @@ git commit -m "feat(config): 增加配置并发版本控制"
 - Produces: `SecretStore.write(ref, credential): Promise<void>`
 - Produces: `SecretStore.delete(ref): Promise<void>`
 
-- [ ] **Step 1: 写密码学基元测试**
+- [x] **Step 1: 写密码学基元测试**
 
 验证 base64url round-trip、相同/不同长度固定耗时比较结果、HMAC 确定性、AES-GCM 随机 nonce、
 错误 key/AAD/篡改 ciphertext 均拒绝。
 
-- [ ] **Step 2: 写 Secret Store 测试**
+- [x] **Step 2: 写 Secret Store 测试**
 
 内存 KV 中只允许出现 envelope，不出现用户名或密码明文；profile A 的密文不能以 profile B 的 AAD
 解密；删除后读取 null。
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 Run:
 
@@ -229,12 +229,12 @@ npx vitest run --config vitest.config.ts tests/unit/crypto.test.ts tests/unit/se
 
 Expected: FAIL，security 模块不存在。
 
-- [ ] **Step 4: 使用 Web Crypto 实现**
+- [x] **Step 4: 使用 Web Crypto 实现**
 
 `CONFIG_KEY` 接受 32 字节 base64url；AES-GCM 使用 12 字节随机 nonce；AAD 为
 `edgetunnel:secrets:v1:<credentialRef>`；KV key 固定为 `edgetunnel:secrets:v1`。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```bash
 npx vitest run --config vitest.config.ts tests/unit/crypto.test.ts tests/unit/secret-store.test.ts
