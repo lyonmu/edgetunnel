@@ -436,6 +436,7 @@ git commit -m "feat(admin): 建立版本化管理接口"
 - Modify: `src/networking/sstp.ts`
 - Delete: `src/networking/proxy-runtime.ts`
 - Test: `tests/unit/dialer.test.ts`
+- Test: `tests/unit/connector-registry.test.ts`
 - Modify: `tests/unit/proxy-connectors.test.ts`
 
 **Interfaces:**
@@ -445,17 +446,17 @@ git commit -m "feat(admin): 建立版本化管理接口"
 - Produces: `createDialer(snapshot, dependencies): Dialer`
 - Produces: `Dialer.connect(target, inbound, signal): Promise<DialResult>`
 
-- [ ] **Step 1: 写路由和 registry 测试**
+- [x] **Step 1: 写路由和 registry 测试**
 
 覆盖规则顺序、域名后缀、CIDR、端口、入站协议、block、默认 profile、禁用 profile、未知 profile、
 私网/环回/链路本地阻止。
 
-- [ ] **Step 2: 写连接分发测试**
+- [x] **Step 2: 写连接分发测试**
 
 为七种 profile 注入 spy connector，验证只调用选中连接器、Secret ref 正确解析、AbortSignal 传播、
 错误不含 credential。
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 Run:
 
@@ -463,7 +464,7 @@ Run:
 npx vitest run --config vitest.config.ts tests/unit/dialer.test.ts tests/unit/proxy-connectors.test.ts
 ```
 
-- [ ] **Step 4: 适配现有连接器**
+- [x] **Step 4: 适配现有连接器**
 
 保留现有 SOCKS5、HTTP、HTTPS、TURN、SSTP 协议实现，通过 adapter 接入统一接口；direct/ProxyIP
 继续复用 `sockets.ts` 和候选竞速。不得复制 TLS、TURN 或 SSTP 实现。
