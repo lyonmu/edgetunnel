@@ -668,12 +668,12 @@ git commit -m "feat(subscription): 原生生成客户端订阅"
 - Consumes: `/api/admin/v1/*`
 - Produces: 登录、系统状态、入站、传输、DNS、profile、路由、订阅预览和日志 UI
 
-- [ ] **Step 1: 写静态资源和安全测试**
+- [x] **Step 1: 写静态资源和安全测试**
 
 断言 HTML 不含远程 `<script>`、inline secret、localStorage token；未认证 `/admin` 重定向；静态资源
 使用正确 Content-Type 和 CSP；旧伪 API 文件不可访问。
 
-- [ ] **Step 2: 运行测试确认旧页面失败**
+- [x] **Step 2: 运行测试确认旧页面失败**
 
 Run:
 
@@ -681,17 +681,17 @@ Run:
 npx vitest run --config vitest.config.ts tests/integration/assets.test.ts tests/integration/admin-ui.test.ts
 ```
 
-- [ ] **Step 3: 实现无框架页面**
+- [x] **Step 3: 实现无框架页面**
 
 登录页 POST JSON session；后台加载 config，按模块编辑，保存携带 revision；password 输入为空不修改，
 删除使用明确按钮；profile 测试和订阅预览显示稳定错误 code。
 
-- [ ] **Step 4: 设置 CSP 和缓存策略**
+- [x] **Step 4: 设置 CSP 和缓存策略**
 
 HTML/API `no-store`；带内容 hash 之外的 JS/CSS 使用短缓存；CSP 至少
 `default-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'`。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```bash
 npx vitest run --config vitest.config.ts tests/integration/assets.test.ts tests/integration/admin-ui.test.ts tests/integration/admin.test.ts

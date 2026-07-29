@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('admin assets', () => {
   it.each([
-    ['/login', 'edgetunnel'],
+    ['/login', 'EdgeTunnel'],
     ['/noADMIN', 'ADMIN'],
     ['/noKV', 'KV'],
   ])('serves %s from local assets', async (path, marker) => {
