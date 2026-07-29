@@ -1,4 +1,4 @@
-import { createDefaultConfig } from './defaults';
+import { createLegacyDefaultConfig } from './legacy-defaults';
 import { migrateStoredConfig } from './migrate';
 import type { StoredConfig } from './types';
 
@@ -16,7 +16,7 @@ export async function loadStoredConfig(
   if (raw !== null) {
     return migrateStoredConfig(raw);
   }
-  const defaults = createDefaultConfig(host, userId);
+  const defaults = createLegacyDefaultConfig(host, userId);
   await kv.put('config.json', JSON.stringify(defaults, null, 2));
   return defaults;
 }

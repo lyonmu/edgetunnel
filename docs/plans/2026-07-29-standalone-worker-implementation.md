@@ -76,6 +76,11 @@
 - Create: `src/config/schema.ts`
 - Create: `src/config/validate.ts`
 - Modify: `src/config/defaults.ts`
+- Create: `src/config/legacy-defaults.ts`
+- Modify: `src/config/migrate.ts`
+- Modify: `src/config/repository.ts`
+- Modify: `src/admin/routes.ts`
+- Modify: `tests/integration/subscription.test.ts`
 - Test: `tests/unit/config-schema.test.ts`
 
 **Interfaces:**
@@ -85,7 +90,7 @@
 - Produces: `parseWorkerConfig(value: unknown): WorkerConfigV1`
 - Produces: `ConfigValidationError`，含 `issues: readonly ConfigIssue[]`
 
-- [ ] **Step 1: 写配置模型失败测试**
+- [x] **Step 1: 写配置模型失败测试**
 
 覆盖默认配置、未知字段、错误 schemaVersion、端口越界、重复 profile ID、缺失默认 profile、
 管理/订阅/传输路径冲突和规则引用不存在 profile。
@@ -103,24 +108,24 @@ expect(() =>
 ).toThrow(/defaultProfileId/);
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `npx vitest run --config vitest.config.ts tests/unit/config-schema.test.ts`
 
 Expected: FAIL，提示 `src/config/schema.ts` 或 `parseWorkerConfig` 不存在。
 
-- [ ] **Step 3: 定义判别联合与默认配置**
+- [x] **Step 3: 定义判别联合与默认配置**
 
 `EgressProfile` 必须用 `type` 区分 `direct`、`proxyip`、`socks5`、`http-connect`、
 `https-connect`、`turn`、`sstp`；所有 credential 只保留 `credentialRef`，不得包含 password。
 默认配置仅启用 VLESS + WebSocket、direct profile、DoH `https://1.1.1.1/dns-query`。
 
-- [ ] **Step 4: 实现无依赖严格解析器**
+- [x] **Step 4: 实现无依赖严格解析器**
 
 逐层检查 plain object、必填键、未知键、字符串长度、数值范围、URL scheme、路径唯一性、ID 唯一性和
 引用完整性。错误路径使用 JSON Pointer，例如 `/egressProfiles/1/port`。
 
-- [ ] **Step 5: 运行配置测试和类型检查**
+- [x] **Step 5: 运行配置测试和类型检查**
 
 Run:
 

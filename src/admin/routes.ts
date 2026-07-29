@@ -1,6 +1,6 @@
 import type { RequestContext } from '../app/types';
 import { createAuthToken, readAuthCookie } from '../auth/session';
-import { createDefaultConfig } from '../config/defaults';
+import { createLegacyDefaultConfig } from '../config/legacy-defaults';
 import { loadStoredConfig, saveStoredConfig } from '../config/repository';
 import { buildRuntimeConfig } from '../config/runtime';
 import { LogRepository } from '../storage/log-repository';
@@ -72,7 +72,7 @@ async function handleAdmin(context: RequestContext): Promise<Response> {
   const runtime = await buildAdminRuntime(context, stored);
 
   if (path === '/admin/init') {
-    const defaults = createDefaultConfig(context.host, context.userId);
+    const defaults = createLegacyDefaultConfig(context.host, context.userId);
     await saveStoredConfig(context.env.KV, defaults);
     return json({ ...(await buildAdminRuntime(context, defaults)), init: '配置已重置为默认值' });
   }

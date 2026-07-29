@@ -1,7 +1,7 @@
 import { createExecutionContext, env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index';
-import { createDefaultConfig } from '../../src/config/defaults';
+import { createLegacyDefaultConfig } from '../../src/config/legacy-defaults';
 import { SUBSCRIPTION_CONVERTER_TIMEOUT_MS } from '../../src/subscription/routes';
 import { md5Twice } from '../../src/shared/hash';
 
@@ -36,7 +36,7 @@ async function fetchWorker(
 
 describe('subscription routes', () => {
   beforeEach(async () => {
-    const config = createDefaultConfig(host, uuid);
+    const config = createLegacyDefaultConfig(host, uuid);
     config.订阅转换配置.SUBAPI = 'https://converter.example.com';
     config.订阅转换配置.SUBCONFIG = 'https://config.example.com/profile.ini';
     await Promise.all([
@@ -56,7 +56,7 @@ describe('subscription routes', () => {
   });
 
   it('generates Shadowsocks plugin links with cipher routing and mux disabled', async () => {
-    const config = createDefaultConfig(host, uuid);
+    const config = createLegacyDefaultConfig(host, uuid);
     config.协议类型 = 'ss';
     config.PATH = '/proxy';
     await env.KV.put('config.json', JSON.stringify(config));

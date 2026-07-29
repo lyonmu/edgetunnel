@@ -1,4 +1,4 @@
-import { createDefaultConfig } from './defaults';
+import { createLegacyDefaultConfig } from './legacy-defaults';
 import type { StoredConfig } from './types';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -20,5 +20,5 @@ export function migrateStoredConfig(value: unknown): StoredConfig {
   const input = isRecord(value) ? value : {};
   const host = typeof input.HOST === 'string' ? input.HOST : '';
   const userId = typeof input.UUID === 'string' ? input.UUID : '';
-  return mergeDefaults(createDefaultConfig(host, userId), input) as StoredConfig;
+  return mergeDefaults(createLegacyDefaultConfig(host, userId), input) as StoredConfig;
 }
