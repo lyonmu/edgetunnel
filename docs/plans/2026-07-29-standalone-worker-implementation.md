@@ -137,7 +137,7 @@ git diff --check
 
 Expected: 全部通过。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add src/config/schema.ts src/config/validate.ts src/config/defaults.ts tests/unit/config-schema.test.ts
@@ -149,7 +149,6 @@ git commit -m "feat(config): 建立版本化配置模型"
 **Files:**
 
 - Modify: `src/config/repository.ts`
-- Modify: `tests/unit/config.test.ts`
 - Test: `tests/unit/config-repository.test.ts`
 
 **Interfaces:**
@@ -160,33 +159,34 @@ git commit -m "feat(config): 建立版本化配置模型"
 - Produces: `saveConfig(kv, config, expectedRevision): Promise<WorkerConfigV1>`
 - Produces: `ConfigRevisionConflict`
 
-- [ ] **Step 1: 写 KV 初始化和并发冲突测试**
+- [x] **Step 1: 写 KV 初始化和并发冲突测试**
 
 使用内存 KV fixture 验证：缺 key 时写入 revision 1 默认配置；读取非法 JSON 时拒绝；expectedRevision
 不一致时不写；成功保存 revision 增加 1；`config.json` 永远不读取。
 
-- [ ] **Step 2: 运行定向测试确认失败**
+- [x] **Step 2: 运行定向测试确认失败**
 
 Run: `npx vitest run --config vitest.config.ts tests/unit/config-repository.test.ts`
 
 Expected: FAIL，旧 Repository 仍访问 `config.json`。
 
-- [ ] **Step 3: 替换 Repository**
+- [x] **Step 3: 替换 Repository**
 
 先读取并严格解析当前配置；保存时比较 `revision`，构造 `{...config, revision: current + 1}` 后只写
 `edgetunnel:config:v1`。KV 写失败原样抛出，不回退旧 key。
 
-- [ ] **Step 4: 删除旧 Repository 测试假设**
+- [x] **Step 4: 保持旧 Repository 测试隔离**
 
-将 `tests/unit/config.test.ts` 中仍有价值的默认值断言迁移到新测试，删除只验证中文字段迁移的断言。
+旧 `tests/unit/config.test.ts` 继续只验证临时 legacy 边界；v1 默认值、严格读取、初始化和 revision
+断言全部放入新测试。Task 13 删除 legacy 边界时再删除旧测试，避免中间提交丢失现有回归信号。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```bash
 npx vitest run --config vitest.config.ts tests/unit/config-schema.test.ts tests/unit/config-repository.test.ts
 npm run typecheck
 git diff --check
-git add src/config/repository.ts tests/unit/config.test.ts tests/unit/config-repository.test.ts
+git add src/config/repository.ts tests/unit/config-repository.test.ts
 git commit -m "feat(config): 增加配置并发版本控制"
 ```
 
