@@ -148,4 +148,19 @@ describe('versioned admin API', () => {
       expect(response.status).toBe(404);
     }
   });
+
+  it('previews subscriptions from the current runtime snapshot', async () => {
+    const cookie = await loginCookie();
+    const response = await fetchWorker('/api/admin/v1/subscriptions/preview?format=clash', {
+      headers: { Cookie: cookie },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        format: 'clash',
+        nodeCount: 1,
+      },
+    });
+  });
 });

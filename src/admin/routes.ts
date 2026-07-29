@@ -17,6 +17,8 @@ import {
   parseConfigUpdateRequest,
 } from './service';
 import { fetchAdminAsset } from './assets';
+import type { SubscriptionFormat } from '../config/schema';
+import { buildSubscriptionNodes, serializeSubscription } from '../subscription/model';
 
 const encoder = new TextEncoder();
 
@@ -149,10 +151,22 @@ async function handleApi(context: RequestContext): Promise<Response> {
         return new Response(null, { status: 204 });
       }
     }
-    if (
-      context.url.pathname === '/api/admin/v1/subscriptions/preview' ||
-      /^\/api\/admin\/v1\/profiles\/[^/]+\/test$/.test(context.url.pathname)
-    ) {
+    if (context.url.pathname === '/api/admin/v1/subscriptions/preview') {
+      if (context.request.method !== 'GET') {
+        return jsonError('METHOD_NOT_ALLOWED', '不支持的请求方法', metadata.requestId, 405);
+      }
+      const format = (context.url.searchParams.get('format') ?? 'mixed') as SubscriptionFormat;
+      if (!snapshot.config.subscription.formats.includes(format)) {
+        return jsonError('FORMAT_NOT_ENABLED', '订阅格式未启用', metadata.requestId, 400);
+      }
+      const nodes = buildSubscriptionNodes(snapshot, context.url);
+      return jsonData({
+        format,
+        nodeCount: nodes.length,
+        content: serializeSubscription(format, nodes),
+      });
+    }
+    if (/^\/api\/admin\/v1\/profiles\/[^/]+\/test$/.test(context.url.pathname)) {
       return jsonError('NOT_READY', '该能力将在后续数据面任务中接入', metadata.requestId, 501);
     }
     return jsonError('NOT_FOUND', '接口不存在', metadata.requestId, 404);

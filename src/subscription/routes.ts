@@ -1,153 +1,63 @@
 import type { RequestContext } from '../app/types';
-import type { SubscriptionType } from './types';
-import { generateMixedSubscription } from './generate';
-import { fetchTextLimited } from '../shared/fetch-limited';
-import { applyClashPatch } from './clash';
-import { applySingboxPatch } from './singbox';
-import { applySurgePatch } from './surge';
-import { loadStoredConfig } from '../config/repository';
-import { buildRuntimeConfig } from '../config/runtime';
-import { md5Twice } from '../shared/hash';
+import { createRequestMetadata } from '../app/request-context';
+import { verifySubscriptionToken } from '../auth/subscription-token';
+import { loadRuntimeSnapshot } from '../config/runtime';
+import type { SubscriptionFormat } from '../config/schema';
+import { buildSubscriptionNodes, serializeSubscription } from './model';
 
-export const SUBSCRIPTION_CONVERTER_TIMEOUT_MS = 30_000;
+const FORMATS = new Set<SubscriptionFormat>(['mixed', 'base64', 'clash', 'singbox', 'surge']);
+
+function detectSubscriptionFormat(url: URL, userAgent: string): SubscriptionFormat | null {
+  const explicit = url.searchParams.get('format');
+  if (explicit !== null) {
+    return FORMATS.has(explicit as SubscriptionFormat) ? (explicit as SubscriptionFormat) : null;
+  }
+
+  const ua = userAgent.toLowerCase();
+  if (ua.includes('clash') || ua.includes('mihomo')) return 'clash';
+  if (ua.includes('sing-box') || ua.includes('singbox')) return 'singbox';
+  if (ua.includes('surge')) return 'surge';
+  return ua.includes('mozilla') ? 'mixed' : 'base64';
+}
+
+function contentType(format: SubscriptionFormat): string {
+  if (format === 'clash') return 'application/x-yaml; charset=utf-8';
+  if (format === 'singbox') return 'application/json; charset=utf-8';
+  return 'text/plain; charset=utf-8';
+}
 
 export async function handleSubscriptionRequest(context: RequestContext): Promise<Response | null> {
-  if (context.url.pathname !== '/sub') {
+  if (context.url.pathname !== '/sub') return null;
+
+  const metadata = createRequestMetadata(context.request, context.env, context.execution);
+  const snapshot = await loadRuntimeSnapshot(metadata);
+  const candidate = context.url.searchParams.get('token') ?? '';
+  if (
+    !candidate ||
+    !(await verifySubscriptionToken(candidate, snapshot.secrets.admin, snapshot.identity.vlessUuid))
+  ) {
     return null;
   }
-
-  const { url, request } = context;
-  const expectedToken = await md5Twice(`${context.host}${context.userId}`);
-  if (url.searchParams.get('token') !== expectedToken) {
-    return null;
+  if (!snapshot.config.subscription.enabled) {
+    return new Response('订阅功能未启用', { status: 404 });
   }
-  const ua = request.headers.get('User-Agent') || '';
 
-  const subscriptionType = detectSubscriptionType(url, ua);
+  const format = detectSubscriptionFormat(context.url, context.userAgent);
+  if (!format) return new Response('不支持的订阅格式', { status: 400 });
+  if (!snapshot.config.subscription.formats.includes(format)) {
+    return new Response('订阅格式未启用', { status: 400 });
+  }
 
-  const responseHeaders: Record<string, string> = {
-    'Content-Type': 'text/plain; charset=utf-8',
+  const nodes = buildSubscriptionNodes(snapshot, context.url);
+  if (!nodes.length) return new Response('没有可用的订阅节点', { status: 503 });
+
+  const headers = new Headers({
+    'Content-Type': contentType(format),
     'Cache-Control': 'no-store',
-  };
-
-  if (!ua.includes('mozilla')) {
-    responseHeaders['Content-Disposition'] = `attachment; filename*=utf-8''edgetunnel`;
+    'X-Content-Type-Options': 'nosniff',
+  });
+  if (!context.userAgent.toLowerCase().includes('mozilla')) {
+    headers.set('Content-Disposition', `attachment; filename="edgetunnel-${format}"`);
   }
-
-  try {
-    let content = '';
-
-    if (subscriptionType === 'mixed' || subscriptionType === 'base64') {
-      content = await generateMixedSubscription(context);
-    } else {
-      const mixedContent = await generateMixedSubscription(context);
-      const converterUrl = await buildConverterUrl(url, subscriptionType, mixedContent, context);
-
-      const response = await fetchTextLimited(
-        converterUrl,
-        {
-          headers: {
-            'User-Agent': `Subconverter for ${subscriptionType} edgetunnel`,
-          },
-        },
-        {
-          timeoutMs: SUBSCRIPTION_CONVERTER_TIMEOUT_MS,
-          maxBytes: 1024 * 1024,
-        },
-      );
-
-      if (!response.ok) {
-        return new Response('订阅转换后端异常：' + response.statusText, {
-          status: response.status,
-        });
-      }
-
-      content = response.text;
-
-      if (subscriptionType === 'clash') {
-        content = applyClashPatch(content, context);
-        responseHeaders['Content-Type'] = 'application/x-yaml; charset=utf-8';
-      } else if (subscriptionType === 'singbox') {
-        content = await applySingboxPatch(content, context);
-        responseHeaders['Content-Type'] = 'application/json; charset=utf-8';
-      } else if (subscriptionType === 'surge') {
-        content = applySurgePatch(content, url, context);
-      }
-    }
-
-    if (
-      subscriptionType === 'base64' ||
-      (subscriptionType === 'mixed' && !ua.toLowerCase().includes('mozilla'))
-    ) {
-      content = btoa(content);
-    }
-
-    return new Response(content, {
-      status: 200,
-      headers: responseHeaders,
-    });
-  } catch (error) {
-    console.error('Subscription generation failed:', error);
-    return new Response('订阅生成失败', { status: 500 });
-  }
-}
-
-function detectSubscriptionType(url: URL, ua: string): SubscriptionType {
-  const uaLower = ua.toLowerCase();
-
-  if (url.searchParams.has('b64') || url.searchParams.has('base64')) {
-    return 'base64';
-  }
-
-  if (url.searchParams.has('target')) {
-    return url.searchParams.get('target') as SubscriptionType;
-  }
-
-  if (
-    url.searchParams.has('clash') ||
-    uaLower.includes('clash') ||
-    uaLower.includes('meta') ||
-    uaLower.includes('mihomo')
-  ) {
-    return 'clash';
-  }
-
-  if (
-    url.searchParams.has('sb') ||
-    url.searchParams.has('singbox') ||
-    uaLower.includes('singbox') ||
-    uaLower.includes('sing-box')
-  ) {
-    return 'singbox';
-  }
-
-  if (url.searchParams.has('surge') || uaLower.includes('surge')) {
-    return 'surge';
-  }
-
-  if (url.searchParams.has('quanx') || uaLower.includes('quantumult')) {
-    return 'quanx';
-  }
-
-  if (url.searchParams.has('loon') || uaLower.includes('loon')) {
-    return 'loon';
-  }
-
-  return 'mixed';
-}
-
-async function buildConverterUrl(
-  originalUrl: URL,
-  targetType: SubscriptionType,
-  mixedContent: string,
-  context: RequestContext,
-): Promise<string> {
-  const { env } = context;
-  const stored = await loadStoredConfig(env.KV, context.host, context.userId);
-  const runtime = buildRuntimeConfig(stored, context);
-  const subApi = env.SUBAPI || runtime.订阅转换配置.SUBAPI;
-  const subConfig = env.SUBCONFIG || runtime.订阅转换配置.SUBCONFIG;
-  void originalUrl;
-
-  return `${subApi}/sub?target=${targetType}&url=${encodeURIComponent(mixedContent)}&config=${encodeURIComponent(subConfig)}`;
+  return new Response(serializeSubscription(format, nodes), { status: 200, headers });
 }

@@ -614,17 +614,17 @@ git commit -m "refactor(transport): 统一隧道连接生命周期"
 - Produces: `serializeMixed`、`serializeBase64`、`serializeClash`、`serializeSingBox`、
   `serializeSurge`
 
-- [ ] **Step 1: 写节点组合测试**
+- [x] **Step 1: 写节点组合测试**
 
 覆盖 VLESS WS/gRPC/XHTTP、Trojan WS/gRPC、Shadowsocks WS；禁用协议不输出；不支持组合跳过并返回
 warning；gRPC/XHTTP 节点使用 publicBaseUrl host。
 
-- [ ] **Step 2: 写格式快照测试**
+- [x] **Step 2: 写格式快照测试**
 
 对固定节点断言五种格式可解析、path/serviceName/SNI/SS `mux=0` 正确、VLESS UDP 含选定
 packet encoding，且任何输出不含 ADMIN、CONFIG_KEY 或 connector credential。
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 Run:
 
@@ -633,12 +633,12 @@ npx vitest run --config vitest.config.ts tests/unit/subscription-model.test.ts
 npx vitest run --config vitest.config.ts tests/integration/subscription.test.ts
 ```
 
-- [ ] **Step 4: 改为原生 serializer**
+- [x] **Step 4: 改为原生 serializer**
 
 删除远程 subconverter 调用和 `SUBAPI/SUBCONFIG`。格式显式由 `?format=` 或 User-Agent 选择，仅接受
 配置启用的枚举值；token 使用 Task 4 HMAC。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```bash
 npx vitest run --config vitest.config.ts tests/unit/subscription-model.test.ts
