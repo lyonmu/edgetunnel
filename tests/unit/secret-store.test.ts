@@ -8,12 +8,14 @@ import {
 
 class MemoryKv {
   readonly values = new Map<string, string>();
+  readonly putCalls: string[] = [];
 
   async get(key: string): Promise<string | null> {
     return this.values.get(key) ?? null;
   }
 
   async put(key: string, value: string): Promise<void> {
+    this.putCalls.push(key);
     this.values.set(key, value);
   }
 
@@ -66,5 +68,26 @@ describe('SecretStore', () => {
 
     await expect(store.write('../secret', credential)).rejects.toThrow(/引用/);
     await expect(store.read('')).rejects.toThrow(/引用/);
+  });
+
+  it('applies multiple credential changes with one KV write', async () => {
+    const kv = new MemoryKv();
+    const store = new SecretStore(kv.namespace(), encryptionKey);
+    await store.write('old', credential);
+    kv.putCalls.length = 0;
+
+    await store.apply({
+      old: null,
+      first: { password: 'one' },
+      second: { username: 'bob', password: 'two' },
+    });
+
+    expect(kv.putCalls).toEqual([SECRET_STORE_KEY]);
+    await expect(store.read('old')).resolves.toBeNull();
+    await expect(store.read('first')).resolves.toEqual({ password: 'one' });
+    await expect(store.read('second')).resolves.toEqual({
+      username: 'bob',
+      password: 'two',
+    });
   });
 });

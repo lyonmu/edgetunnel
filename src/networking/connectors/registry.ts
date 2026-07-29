@@ -47,6 +47,37 @@ function ensureActive(signal: AbortSignal): void {
   if (signal.aborted) throw new DOMException('连接已取消', 'AbortError');
 }
 
+async function connectWithDeadline(
+  connect: () => Promise<Socket>,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<Socket> {
+  ensureActive(signal);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let aborted = false;
+  const operation = connect();
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    const abort = () => {
+      aborted = true;
+      reject(new DOMException('连接已取消', 'AbortError'));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    timer = setTimeout(() => reject(new Error('连接超时')), timeoutMs);
+    operation.finally(() => signal.removeEventListener('abort', abort)).catch(() => undefined);
+  });
+  try {
+    const socket = await Promise.race([operation, cancellation]);
+    ensureActive(signal);
+    return socket;
+  } catch (error) {
+    void operation.then((socket) => socket.close()).catch(() => undefined);
+    if (aborted) throw new DOMException('连接已取消', 'AbortError');
+    throw error;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 async function writeAfterConnect(socket: Socket, initialData?: Uint8Array): Promise<Socket> {
   if (initialData?.byteLength) await writeInitialData(socket, initialData);
   return socket;
@@ -67,9 +98,15 @@ export function createConnectorRegistry(
       async connect(target, profile, _credential, signal, initialData) {
         assertProfileType(profile, 'direct');
         ensureActive(signal);
-        const socket = await openSocket(socketConnector, target, profile.timeoutMs);
-        ensureActive(signal);
-        return writeAfterConnect(socket, initialData);
+        return connectWithDeadline(
+          async () =>
+            writeAfterConnect(
+              await openSocket(socketConnector, target, profile.timeoutMs),
+              initialData,
+            ),
+          signal,
+          profile.timeoutMs,
+        );
       },
     },
     proxyip: {
@@ -80,24 +117,34 @@ export function createConnectorRegistry(
           const parsed = parseSocks5Address(endpoint, 443);
           return { hostname: parsed.hostname, port: parsed.port };
         });
-        const socket =
-          candidates.length === 1
-            ? await openSocket(socketConnector, candidates[0]!, profile.timeoutMs)
-            : (await raceSockets(socketConnector, candidates, profile.timeoutMs)).socket;
-        ensureActive(signal);
-        return writeAfterConnect(socket, initialData);
+        return connectWithDeadline(
+          async () => {
+            const socket =
+              candidates.length === 1
+                ? await openSocket(socketConnector, candidates[0]!, profile.timeoutMs)
+                : (await raceSockets(socketConnector, candidates, profile.timeoutMs)).socket;
+            return writeAfterConnect(socket, initialData);
+          },
+          signal,
+          profile.timeoutMs,
+        );
       },
     },
     socks5: {
       async connect(target, profile, credential, signal, initialData) {
         assertProfileType(profile, 'socks5');
         ensureActive(signal);
-        return connectSocks5(
-          target.hostname,
-          target.port,
-          initialData ?? null,
-          proxyAddress(profile, credential),
-          socketConnector,
+        return connectWithDeadline(
+          () =>
+            connectSocks5(
+              target.hostname,
+              target.port,
+              initialData ?? null,
+              proxyAddress(profile, credential),
+              socketConnector,
+            ),
+          signal,
+          profile.timeoutMs,
         );
       },
     },
@@ -105,13 +152,18 @@ export function createConnectorRegistry(
       async connect(target, profile, credential, signal, initialData) {
         assertProfileType(profile, 'http-connect');
         ensureActive(signal);
-        return connectHttp(
-          target.hostname,
-          target.port,
-          initialData ?? null,
-          proxyAddress(profile, credential),
-          socketConnector,
-          false,
+        return connectWithDeadline(
+          () =>
+            connectHttp(
+              target.hostname,
+              target.port,
+              initialData ?? null,
+              proxyAddress(profile, credential),
+              socketConnector,
+              false,
+            ),
+          signal,
+          profile.timeoutMs,
         );
       },
     },
@@ -119,12 +171,17 @@ export function createConnectorRegistry(
       async connect(target, profile, credential, signal, initialData) {
         assertProfileType(profile, 'https-connect');
         ensureActive(signal);
-        return connectHttps(
-          target.hostname,
-          target.port,
-          initialData ?? null,
-          proxyAddress(profile, credential),
-          socketConnector,
+        return connectWithDeadline(
+          () =>
+            connectHttps(
+              target.hostname,
+              target.port,
+              initialData ?? null,
+              proxyAddress(profile, credential),
+              socketConnector,
+            ),
+          signal,
+          profile.timeoutMs,
         );
       },
     },
@@ -132,28 +189,40 @@ export function createConnectorRegistry(
       async connect(target, profile, credential, signal, initialData) {
         assertProfileType(profile, 'turn');
         ensureActive(signal);
-        const socket = await connectTurn(
-          proxyAddress(profile, credential),
-          target.hostname,
-          target.port,
-          socketConnector,
+        return connectWithDeadline(
+          async () =>
+            writeAfterConnect(
+              await connectTurn(
+                proxyAddress(profile, credential),
+                target.hostname,
+                target.port,
+                socketConnector,
+              ),
+              initialData,
+            ),
+          signal,
+          profile.timeoutMs,
         );
-        ensureActive(signal);
-        return writeAfterConnect(socket, initialData);
       },
     },
     sstp: {
       async connect(target, profile, credential, signal, initialData) {
         assertProfileType(profile, 'sstp');
         ensureActive(signal);
-        const socket = await connectSstp(
-          proxyAddress(profile, credential),
-          target.hostname,
-          target.port,
-          socketConnector,
+        return connectWithDeadline(
+          async () =>
+            writeAfterConnect(
+              await connectSstp(
+                proxyAddress(profile, credential),
+                target.hostname,
+                target.port,
+                socketConnector,
+              ),
+              initialData,
+            ),
+          signal,
+          profile.timeoutMs,
         );
-        ensureActive(signal);
-        return writeAfterConnect(socket, initialData);
       },
     },
   };

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 interface WranglerConfig {
   main: string;
   compatibility_date: string;
+  compatibility_flags: string[];
   workers_dev: boolean;
   preview_urls: boolean;
   assets: { directory: string; binding: string; run_worker_first: boolean };
@@ -34,6 +35,7 @@ describe('Wrangler production boundary', () => {
 
     expect(config.main).toBe('src/index.ts');
     expect(config.compatibility_date).toBe('2026-07-29');
+    expect(config.compatibility_flags).toContain('nodejs_compat');
     expect(config.workers_dev).toBe(true);
     expect(config.preview_urls).toBe(true);
     expect(config.assets).toEqual({

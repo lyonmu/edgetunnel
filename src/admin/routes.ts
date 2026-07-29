@@ -1,5 +1,4 @@
-import type { RequestContext, RuntimeEnv } from '../app/types';
-import { createRequestMetadata } from '../app/request-context';
+import type { RequestContext } from '../app/types';
 import { jsonData, jsonError } from '../app/response';
 import {
   createSession,
@@ -16,9 +15,11 @@ import {
   ConfigValidationError,
   parseConfigUpdateRequest,
 } from './service';
-import { fetchAdminAsset } from './assets';
+import { fetchAdminAsset, isAdminAssetPath } from './assets';
 import type { SubscriptionFormat } from '../config/schema';
+import { createSubscriptionToken } from '../auth/subscription-token';
 import { buildSubscriptionNodes, serializeSubscription } from '../subscription/model';
+import { LogRepository, type SecurityEvent } from '../storage/log-repository';
 
 const encoder = new TextEncoder();
 
@@ -54,15 +55,55 @@ function validateWriteRequest(context: RequestContext): Response | null {
 }
 
 async function runtime(context: RequestContext) {
-  const metadata = createRequestMetadata(
-    context.request,
-    context.env as RuntimeEnv,
-    context.execution,
-  );
   return {
-    metadata,
-    snapshot: await loadRuntimeSnapshot(metadata),
+    metadata: context,
+    snapshot: await loadRuntimeSnapshot(context),
   };
+}
+
+function audit(
+  context: RequestContext,
+  retention: number,
+  type: string,
+  outcome: SecurityEvent['outcome'],
+  details?: Record<string, unknown>,
+): void {
+  const logs = new LogRepository(context.env.KV, retention);
+  context.execution.waitUntil(
+    logs.appendSafely({
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      type,
+      outcome,
+      requestId: context.requestId,
+      ...(details ? { details } : {}),
+    }),
+  );
+}
+
+function parseProfileTarget(value: unknown): { hostname: string; port: number } {
+  if (value === undefined) return { hostname: 'www.gstatic.com', port: 443 };
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ConfigValidationError([{ path: '/', message: '连接测试参数必须是对象' }]);
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => key !== 'hostname' && key !== 'port')) {
+    throw new ConfigValidationError([{ path: '/', message: '连接测试包含未知字段' }]);
+  }
+  const hostname = record.hostname === undefined ? 'www.gstatic.com' : record.hostname;
+  const port = record.port === undefined ? 443 : record.port;
+  if (
+    typeof hostname !== 'string' ||
+    hostname.length < 1 ||
+    hostname.length > 253 ||
+    /[\s/@]/.test(hostname)
+  ) {
+    throw new ConfigValidationError([{ path: '/hostname', message: '目标主机名无效' }]);
+  }
+  if (!Number.isInteger(port) || Number(port) < 1 || Number(port) > 65_535) {
+    throw new ConfigValidationError([{ path: '/port', message: '目标端口无效' }]);
+  }
+  return { hostname: hostname.toLowerCase(), port: Number(port) };
 }
 
 async function authenticated(context: RequestContext, admin: string): Promise<boolean> {
@@ -80,6 +121,9 @@ async function handleSession(context: RequestContext): Promise<Response> {
     try {
       body = await context.request.json();
     } catch {
+      audit(context, snapshot.config.observability.retention, 'admin_login', 'denied', {
+        clientIp: context.clientIp,
+      });
       return jsonError('INVALID_CREDENTIALS', '用户名或密码无效', metadata.requestId, 401);
     }
     const password =
@@ -87,16 +131,23 @@ async function handleSession(context: RequestContext): Promise<Response> {
         ? String((body as { password: unknown }).password)
         : '';
     if (!timingSafeEqual(encoder.encode(password), encoder.encode(snapshot.secrets.admin))) {
+      audit(context, snapshot.config.observability.retention, 'admin_login', 'denied', {
+        clientIp: context.clientIp,
+      });
       return jsonError('INVALID_CREDENTIALS', '用户名或密码无效', metadata.requestId, 401);
     }
     const response = jsonData({ authenticated: true }, 201);
     response.headers.set('Set-Cookie', sessionCookie(await createSession(snapshot.secrets.admin)));
+    audit(context, snapshot.config.observability.retention, 'admin_login', 'success', {
+      clientIp: context.clientIp,
+    });
     return response;
   }
 
   if (context.request.method === 'DELETE') {
     const response = new Response(null, { status: 204 });
     response.headers.set('Set-Cookie', expiredSessionCookie());
+    audit(context, snapshot.config.observability.retention, 'admin_logout', 'success');
     return response;
   }
 
@@ -141,7 +192,11 @@ async function handleApi(context: RequestContext): Promise<Response> {
       }
       if (context.request.method === 'PUT') {
         const update = parseConfigUpdateRequest(await context.request.json());
-        return jsonData({ config: await service.updateConfig(update) });
+        const config = await service.updateConfig(update);
+        audit(context, config.observability.retention, 'config_update', 'success', {
+          revision: config.revision,
+        });
+        return jsonData({ config });
       }
     }
     if (context.url.pathname === '/api/admin/v1/logs') {
@@ -160,14 +215,61 @@ async function handleApi(context: RequestContext): Promise<Response> {
         return jsonError('FORMAT_NOT_ENABLED', '订阅格式未启用', metadata.requestId, 400);
       }
       const nodes = buildSubscriptionNodes(snapshot, context.url);
+      const subscriptionUrl = new URL(
+        '/sub',
+        snapshot.config.subscription.publicBaseUrl ?? context.url.origin,
+      );
+      subscriptionUrl.searchParams.set(
+        'token',
+        await createSubscriptionToken(snapshot.secrets.admin, snapshot.identity.vlessUuid),
+      );
+      subscriptionUrl.searchParams.set('format', format);
       return jsonData({
         format,
         nodeCount: nodes.length,
+        subscriptionUrl: subscriptionUrl.toString(),
         content: serializeSubscription(format, nodes),
       });
     }
-    if (/^\/api\/admin\/v1\/profiles\/[^/]+\/test$/.test(context.url.pathname)) {
-      return jsonError('NOT_READY', '该能力将在后续数据面任务中接入', metadata.requestId, 501);
+    const profileMatch = context.url.pathname.match(/^\/api\/admin\/v1\/profiles\/([^/]+)\/test$/);
+    if (profileMatch) {
+      if (context.request.method !== 'POST') {
+        return jsonError('METHOD_NOT_ALLOWED', '不支持的请求方法', metadata.requestId, 405);
+      }
+      const profileId = decodeURIComponent(profileMatch[1]!);
+      const profile = snapshot.config.egressProfiles.find(
+        (candidate) => candidate.id === profileId && candidate.enabled,
+      );
+      if (!profile) {
+        return jsonError(
+          'PROFILE_NOT_FOUND',
+          '出站 Profile 不存在或未启用',
+          metadata.requestId,
+          404,
+        );
+      }
+      const body: unknown = await context.request.json();
+      const target = parseProfileTarget(body);
+      try {
+        const result = await service.testProfile(snapshot, profileId, target);
+        audit(context, snapshot.config.observability.retention, 'profile_test', 'success', {
+          profileId,
+          profileType: profile.type,
+          durationMs: result.durationMs,
+        });
+        return jsonData(result);
+      } catch {
+        audit(context, snapshot.config.observability.retention, 'profile_test', 'error', {
+          profileId,
+          profileType: profile.type,
+        });
+        return jsonError(
+          'PROFILE_TEST_FAILED',
+          '出站 Profile 连接测试失败',
+          metadata.requestId,
+          502,
+        );
+      }
     }
     return jsonError('NOT_FOUND', '接口不存在', metadata.requestId, 404);
   } catch (error) {
@@ -177,6 +279,9 @@ async function handleApi(context: RequestContext): Promise<Response> {
     }
     if (error instanceof ConfigValidationError) {
       return jsonError('CONFIG_INVALID', error.message, requestId, 422);
+    }
+    if (error instanceof SyntaxError || error instanceof URIError) {
+      return jsonError('INVALID_JSON', '请求 JSON 或路径编码无效', requestId, 400);
     }
     if (error instanceof RuntimeConfigurationError) {
       return jsonError('RUNTIME_NOT_CONFIGURED', error.message, requestId, 503);
@@ -188,6 +293,9 @@ async function handleApi(context: RequestContext): Promise<Response> {
 
 export async function routeAdminRequest(context: RequestContext): Promise<Response | null> {
   const path = context.url.pathname;
+  if (isAdminAssetPath(path) && path !== '/admin' && path !== '/login') {
+    return fetchAdminAsset(context, path);
+  }
   if (isApiPath(path)) return handleApi(context);
   if (path === '/login') {
     try {

@@ -137,6 +137,7 @@ describe('Dialer', () => {
     return {
       registry,
       resolveCredential: vi.fn(async () => ({ username: 'alice', password: 'secret' })),
+      resolveTarget: vi.fn(async () => ['203.0.113.10']),
     };
   }
 
@@ -179,8 +180,39 @@ describe('Dialer', () => {
         ),
       ).rejects.toBeInstanceOf(BlockedTargetError);
       expect(connect).not.toHaveBeenCalled();
+      expect(deps.resolveTarget).not.toHaveBeenCalled();
     },
   );
+
+  it('blocks a hostname when DNS resolves to a private address', async () => {
+    const connect = vi.fn(async () => fakeSocket());
+    const deps = dependencies({ connect });
+    deps.resolveTarget = vi.fn(async () => ['10.0.0.8']);
+
+    await expect(
+      createDialer(snapshot(), deps).connect(
+        { hostname: 'rebinding.example.com', port: 443 },
+        'vless',
+        new AbortController().signal,
+      ),
+    ).rejects.toBeInstanceOf(BlockedTargetError);
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a hostname cannot be resolved for private-target enforcement', async () => {
+    const connect = vi.fn(async () => fakeSocket());
+    const deps = dependencies({ connect });
+    deps.resolveTarget = vi.fn(async () => []);
+
+    await expect(
+      createDialer(snapshot(), deps).connect(
+        { hostname: 'unresolved.example.com', port: 443 },
+        'vless',
+        new AbortController().signal,
+      ),
+    ).rejects.toBeInstanceOf(BlockedTargetError);
+    expect(connect).not.toHaveBeenCalled();
+  });
 
   it('rejects an already aborted request before resolving credentials', async () => {
     const deps = dependencies({ connect: vi.fn(async () => fakeSocket()) });

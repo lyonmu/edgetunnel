@@ -61,7 +61,7 @@ describe('gRPC transport', () => {
     } as unknown as ReadableStreamDefaultController;
     const bridge = createGrpcBridge(controller);
 
-    bridge.send(new Uint8Array([1, 2, 3]));
+    void bridge.send(new Uint8Array([1, 2, 3]));
     expect(controller.enqueue).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(1);
@@ -85,7 +85,7 @@ describe('gRPC transport', () => {
       headers: { 'Content-Type': 'application/grpc' },
       body,
     });
-    const connectTCP = vi.fn(async (_host, _port, _data, _bridge, wrapper) => {
+    const connectTCP = vi.fn(async (_host, _port, _data, bridge, wrapper) => {
       wrapper.socket = {
         readable: new ReadableStream(),
         writable: new WritableStream(),
@@ -94,6 +94,7 @@ describe('gRPC transport', () => {
         close: vi.fn(),
         startTls: vi.fn(),
       } as unknown as Socket;
+      queueMicrotask(() => bridge.close());
     });
 
     const response = handleGRPC(request, context(request), connectTCP);
@@ -108,6 +109,41 @@ describe('gRPC transport', () => {
       expect.anything(),
       'vless',
     );
+  });
+
+  it('keeps the downlink open after upload EOF until the target finishes', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(buildGrpcFrame(vlessPacket()));
+        controller.close();
+      },
+    });
+    const request = new Request('https://example.com/edgetunnel/Tun', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/grpc' },
+      body,
+    });
+    const connectTCP = vi.fn(async (_host, _port, _data, bridge, wrapper) => {
+      wrapper.socket = {
+        readable: new ReadableStream(),
+        writable: new WritableStream(),
+        opened: Promise.resolve({ remoteAddress: null, localAddress: null }),
+        closed: new Promise<void>(() => {}),
+        close: vi.fn(),
+        startTls: vi.fn(),
+      } as unknown as Socket;
+      setTimeout(() => {
+        void Promise.resolve(bridge.send(new Uint8Array([7, 8]))).then(() => bridge.close());
+      }, 5);
+    });
+
+    const response = handleGRPC(request, context(request), connectTCP);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+
+    expect(parseGrpcFrames(bytes).frames.map(parseGrpcPayload)).toEqual([
+      new Uint8Array([0, 0]),
+      new Uint8Array([7, 8]),
+    ]);
   });
 
   it('frames VLESS UDP DNS responses as gRPC messages', async () => {

@@ -8,15 +8,17 @@ import { loadConfig } from '../config/repository';
 import { loadRuntimeSnapshot, RuntimeConfigurationError } from '../config/runtime';
 import { SecretStore } from '../security/secret-store';
 import { createConnectorRegistry } from '../networking/connectors/registry';
-import { createDialer } from '../networking/dialer';
+import { createDialer, resolveTargetAddresses } from '../networking/dialer';
 import { createTunnelConnectTCP } from '../transports/session';
-import { camouflageResponse, jsonError, routeVersion } from './response';
+import { camouflageResponse, jsonData, jsonError, routeVersion } from './response';
 
 function isAdminPath(pathname: string): boolean {
   return (
     pathname.startsWith('/admin/') ||
     pathname === '/admin' ||
     pathname === '/login' ||
+    pathname.startsWith('/login/') ||
+    pathname.startsWith('/shared/') ||
     pathname.startsWith('/api/admin/')
   );
 }
@@ -42,6 +44,7 @@ async function createDataPlane(context: RequestContext) {
   const dialer = createDialer(snapshot, {
     registry: createConnectorRegistry(),
     resolveCredential: (ref) => store.read(ref),
+    resolveTarget: resolveTargetAddresses,
   });
   const dataPlaneContext: DataPlaneContext = {
     ...context,
@@ -74,7 +77,8 @@ async function routeDataPlane(context: RequestContext): Promise<Response | null>
       streamPost &&
       isGRPCTraffic(request) &&
       dataPlane.snapshot.config.transports.grpc.enabled &&
-      url.pathname === `/${dataPlane.snapshot.config.transports.grpc.serviceName}`
+      url.pathname ===
+        `/${dataPlane.snapshot.config.transports.grpc.serviceName.replace(/^\/+|\/+$/g, '')}/Tun`
     ) {
       return handleGRPC(request, dataPlane.context, dataPlane.connectTCP);
     }
@@ -126,6 +130,10 @@ export async function routeRequest(context: RequestContext): Promise<Response> {
 
   const version = routeVersion(context);
   if (version) return version;
+
+  if (url.pathname === '/healthz') {
+    return jsonData({ status: 'ok', service: 'edgetunnel' });
+  }
 
   if (url.protocol === 'http:') {
     const secure = new URL(url);

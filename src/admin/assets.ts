@@ -3,12 +3,19 @@ import type { RequestContext } from '../app/types';
 const ASSET_PATHS = {
   '/admin': '/admin/',
   '/login': '/login/',
+  '/admin/app.js': '/admin/app.js',
+  '/admin/styles.css': '/admin/styles.css',
+  '/login/app.js': '/login/app.js',
+  '/shared/styles.css': '/shared/styles.css',
 } as const;
 
-export function fetchAdminAsset(
-  context: RequestContext,
-  path: keyof typeof ASSET_PATHS,
-): Promise<Response> {
+export type AdminAssetPath = keyof typeof ASSET_PATHS;
+
+export function isAdminAssetPath(path: string): path is AdminAssetPath {
+  return Object.hasOwn(ASSET_PATHS, path);
+}
+
+export function fetchAdminAsset(context: RequestContext, path: AdminAssetPath): Promise<Response> {
   const assetUrl = new URL(ASSET_PATHS[path], context.url);
   return context.env.ASSETS.fetch(new Request(assetUrl, { method: 'GET' })).then((response) => {
     const headers = new Headers(response.headers);

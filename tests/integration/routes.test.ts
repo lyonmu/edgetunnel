@@ -98,6 +98,29 @@ describe('route priority', () => {
     });
   });
 
+  describe('health endpoint', () => {
+    it('returns process health without requiring secrets', async () => {
+      const response = await worker.fetch(
+        new Request('https://example.com/healthz'),
+        {
+          KV: undefined!,
+          ASSETS: env.ASSETS,
+          ADMIN: undefined!,
+          UUID: undefined!,
+          CONFIG_KEY: undefined!,
+          TROJAN_PASSWORD: undefined!,
+          SHADOWSOCKS_PASSWORD: undefined!,
+        },
+        createExecutionContext(),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        data: { status: 'ok', service: 'edgetunnel' },
+      });
+    });
+  });
+
   describe('transport routes', () => {
     it('WebSocket upgrade is intercepted by transport handler', async () => {
       const req = new Request('https://example.com/ws', {
@@ -113,7 +136,7 @@ describe('route priority', () => {
     });
 
     it('POST with grpc content-type is handled by gRPC transport', async () => {
-      const req = new Request('https://example.com/edgetunnel', {
+      const req = new Request('https://example.com/edgetunnel/Tun', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/grpc',

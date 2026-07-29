@@ -11,6 +11,7 @@ import type { DataPlaneContext } from '../app/types';
 import {
   createDnsUdpSession,
   isVlessPacketAddrTarget,
+  queryDnsDoh,
   type DnsUdpProtocol,
 } from '../networking/udp-dns';
 
@@ -33,12 +34,15 @@ export function handleGRPC(
   });
 
   let uploadQueueRef: ReturnType<typeof createUploadQueue> | null = null;
+  let grpcBridgeRef: GrpcBridge | null = null;
 
   return new Response(
     new ReadableStream({
       async start(controller) {
-        const grpcBridge = createGrpcBridge(controller);
+        const grpcBridge = (grpcBridgeRef = createGrpcBridge(controller));
         let uploadQueue: ReturnType<typeof createUploadQueue> | null = null;
+        let failed = false;
+        let dnsSession: ReturnType<typeof createDnsUdpSession> | null = null;
 
         uploadQueue = uploadQueueRef = createUploadQueue({
           getWriter: writerProvider.getWriter,
@@ -70,8 +74,6 @@ export function handleGRPC(
             ctx.userId,
             ctx.runtimeSnapshot.secrets.trojanPassword,
           );
-          let dnsSession: ReturnType<typeof createDnsUdpSession> | null = null;
-
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -116,14 +118,30 @@ export function handleGRPC(
                     }
                     dnsProtocol = 'vless-packetaddr';
                   }
-                  dnsSession = createDnsSession(dnsProtocol, grpcBridge, firstPacket.respHeader);
+                  const dnsConfig = ctx.runtimeSnapshot.config.dns;
+                  if (!dnsConfig.enabled) throw new Error('DNS is not enabled');
+                  dnsSession =
+                    createDnsSession === createDnsUdpSession
+                      ? createDnsUdpSession(
+                          dnsProtocol,
+                          grpcBridge,
+                          firstPacket.respHeader,
+                          (payload) =>
+                            queryDnsDoh(payload, fetch, {
+                              endpoint: dnsConfig.dohUrl,
+                              timeoutMs: dnsConfig.timeoutMs,
+                              maxMessageBytes: dnsConfig.maxMessageBytes,
+                            }),
+                          { maxMessageBytes: dnsConfig.maxMessageBytes },
+                        )
+                      : createDnsSession(dnsProtocol, grpcBridge, firstPacket.respHeader);
                   if (firstPacket.rawData.byteLength) {
                     await dnsSession.push(firstPacket.rawData);
                   }
                   continue;
                 }
 
-                if (firstPacket.respHeader) grpcBridge.send(firstPacket.respHeader);
+                if (firstPacket.respHeader) await grpcBridge.send(firstPacket.respHeader);
                 await connectTCP(
                   firstPacket.hostname,
                   firstPacket.port,
@@ -141,7 +159,23 @@ export function handleGRPC(
           }
 
           await uploadQueue.waitIdle();
+          if (dnsSession) {
+            grpcBridge.close();
+          } else if (wrapper.socket) {
+            const writer = writerProvider.getWriter();
+            if (writer) {
+              try {
+                await writer.close();
+              } finally {
+                writerProvider.releaseWriter();
+              }
+            }
+            await grpcBridge.closed;
+          } else {
+            grpcBridge.close();
+          }
         } catch (error) {
+          failed = true;
           console.error(
             JSON.stringify({
               event: 'grpc_transport_error',
@@ -156,13 +190,18 @@ export function handleGRPC(
           } catch {
             /* ignore */
           }
-          grpcBridge.close();
-          try {
-            void wrapper.socket?.close();
-          } catch {
-            /* ignore */
+          if (failed) {
+            grpcBridge.close();
+            try {
+              void wrapper.socket?.close();
+            } catch {
+              /* ignore */
+            }
           }
         }
+      },
+      pull() {
+        grpcBridgeRef?.notifyPull();
       },
       cancel() {
         uploadQueueRef?.clear();
@@ -185,11 +224,22 @@ export function handleGRPC(
 
 interface GrpcBridge extends TransportBridge {
   flushPending(): void;
+  notifyPull(): void;
+  readonly closed: Promise<void>;
 }
 
 export function createGrpcBridge(controller: ReadableStreamDefaultController): GrpcBridge {
+  const maxQueuedBytes = 1024 * 1024;
   let closed = false;
-  const sendQueue: Uint8Array[] = [];
+  let resolveClosed!: () => void;
+  const closedPromise = new Promise<void>((resolve) => {
+    resolveClosed = resolve;
+  });
+  const sendQueue: Array<{
+    frame: Uint8Array;
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }> = [];
   let queuedBytes = 0;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -198,19 +248,23 @@ export function createGrpcBridge(controller: ReadableStreamDefaultController): G
       clearTimeout(flushTimer);
       flushTimer = null;
     }
-    if (!queuedBytes) return;
+    if (!queuedBytes || (controller.desiredSize ?? 1) <= 0) return;
     const out = new Uint8Array(queuedBytes);
     let offset = 0;
     for (const item of sendQueue) {
-      out.set(item, offset);
-      offset += item.byteLength;
+      out.set(item.frame, offset);
+      offset += item.frame.byteLength;
     }
-    sendQueue.length = 0;
+    const flushed = sendQueue.splice(0);
     queuedBytes = 0;
     try {
       controller.enqueue(out);
-    } catch {
+      for (const item of flushed) item.resolve();
+    } catch (error) {
       closed = true;
+      const failure = error instanceof Error ? error : new Error(String(error));
+      for (const item of flushed) item.reject(failure);
+      resolveClosed();
     }
   };
 
@@ -222,26 +276,41 @@ export function createGrpcBridge(controller: ReadableStreamDefaultController): G
       if (closed) return;
       const chunk = data instanceof Uint8Array ? data : new Uint8Array(data);
       const frame = buildGrpcFrame(chunk);
-      sendQueue.push(frame);
-      queuedBytes += frame.byteLength;
-      if (queuedBytes >= 32 * 1024) {
-        flush();
-      } else if (flushTimer === null) {
-        flushTimer = setTimeout(flush, 1);
+      if (queuedBytes + frame.byteLength > maxQueuedBytes) {
+        const error = new Error('gRPC response queue limit exceeded');
+        this.close();
+        return Promise.reject(error);
       }
+      queuedBytes += frame.byteLength;
+      const pending = new Promise<void>((resolve, reject) => {
+        sendQueue.push({ frame, resolve, reject });
+      });
+      if (queuedBytes >= 32 * 1024) flush();
+      else if (flushTimer === null) flushTimer = setTimeout(flush, 1);
+      return pending;
     },
     flushPending() {
       flush();
+    },
+    notifyPull() {
+      flush();
+    },
+    get closed() {
+      return closedPromise;
     },
     close() {
       if (closed) return;
       flush();
       closed = true;
+      const error = new Error('gRPC bridge closed');
+      for (const item of sendQueue.splice(0)) item.reject(error);
+      queuedBytes = 0;
       try {
         controller.close();
       } catch {
         /* ignore */
       }
+      resolveClosed();
     },
   };
 }

@@ -2,7 +2,10 @@ import { createExecutionContext, env } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import type { DataPlaneContext } from '../../src/app/types';
 import { createDefaultConfig } from '../../src/config/defaults';
-import { createShadowsocksEncryptor } from '../../src/protocols/shadowsocks';
+import {
+  createShadowsocksDecryptor,
+  createShadowsocksEncryptor,
+} from '../../src/protocols/shadowsocks';
 import { handleWebSocket } from '../../src/transports/websocket';
 import { createDnsUdpSession } from '../../src/networking/udp-dns';
 
@@ -35,7 +38,7 @@ function context(url: string): DataPlaneContext {
         admin: 'admin',
         configKey: 'key',
         trojanPassword: uuid,
-        shadowsocksPassword: uuid,
+        shadowsocksPassword: 'independent-ss-password',
       },
       identity: { vlessUuid: uuid },
       requestId: crypto.randomUUID(),
@@ -110,7 +113,7 @@ describe('WebSocket transport', () => {
   it('decrypts Shadowsocks WebSocket input selected by enc', async () => {
     const host = new TextEncoder().encode('example.com');
     const plaintext = new Uint8Array([0x03, host.length, ...host, 0x01, 0xbb, 1, 2]);
-    const encryptor = await createShadowsocksEncryptor(uuid, 'aes-128-gcm');
+    const encryptor = await createShadowsocksEncryptor('independent-ss-password', 'aes-128-gcm');
     const firstEncrypted = await encryptor.encrypt(plaintext.slice(0, 5));
     const secondEncrypted = await encryptor.encrypt(plaintext.slice(5));
     const connectTCP = vi.fn(async (_host, _port, _data, _bridge, wrapper) => {
@@ -141,6 +144,36 @@ describe('WebSocket transport', () => {
     client.close();
   });
 
+  it('encrypts Shadowsocks WebSocket downlink with its independent password', async () => {
+    const host = new TextEncoder().encode('example.com');
+    const plaintext = new Uint8Array([0x03, host.length, ...host, 0x01, 0xbb]);
+    const encryptor = await createShadowsocksEncryptor('independent-ss-password', 'aes-128-gcm');
+    const connectTCP = vi.fn(async (_host, _port, _data, bridge, wrapper) => {
+      wrapper.socket = connectedSocket();
+      bridge.send(new Uint8Array([9, 8, 7]));
+    });
+    const request = new Request('https://example.com/ws?enc=aes-128-gcm', {
+      headers: { Upgrade: 'websocket' },
+    });
+    const response = handleWebSocket(request, context(request.url), connectTCP);
+    const client = response.webSocket!;
+    client.binaryType = 'arraybuffer';
+    client.accept();
+    const downlink = new Promise<Uint8Array>((resolve) => {
+      client.addEventListener('message', (event) => {
+        resolve(new Uint8Array(event.data as ArrayBuffer));
+      });
+    });
+
+    client.send(await encryptor.encrypt(plaintext));
+
+    const decryptor = createShadowsocksDecryptor('independent-ss-password', 'aes-128-gcm');
+    await expect(downlink.then((bytes) => decryptor.push(bytes))).resolves.toEqual([
+      new Uint8Array([9, 8, 7]),
+    ]);
+    client.close();
+  });
+
   it('forwards VLESS UDP DNS without opening a TCP target connection', async () => {
     const connectTCP = vi.fn();
     const request = new Request('https://example.com/dns', {
@@ -167,5 +200,24 @@ describe('WebSocket transport', () => {
     await expect(message).resolves.toEqual(new Uint8Array([0, 0, 0, 1, 9]));
     expect(connectTCP).not.toHaveBeenCalled();
     client.close();
+  });
+
+  it('rejects DNS traffic when DNS is disabled', async () => {
+    const requestContext = context('https://example.com/dns');
+    requestContext.runtimeSnapshot.config.dns.enabled = false;
+    const response = handleWebSocket(
+      new Request(requestContext.url, { headers: { Upgrade: 'websocket' } }),
+      requestContext,
+      vi.fn(),
+    );
+    const client = response.webSocket!;
+    client.accept();
+    const closed = new Promise<void>((resolve) =>
+      client.addEventListener('close', () => resolve()),
+    );
+
+    client.send(vlessUdpPacket());
+
+    await expect(closed).resolves.toBeUndefined();
   });
 });

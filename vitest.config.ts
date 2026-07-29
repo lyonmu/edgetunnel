@@ -9,7 +9,11 @@ export default defineConfig({
     }),
   ],
   test: {
-    exclude: ['tests/integration/connectors/**/*.test.ts', 'tests/unit/no-legacy.test.ts'],
+    exclude: [
+      'tests/integration/connectors/**/*.test.ts',
+      'tests/unit/no-legacy.test.ts',
+      'tests/unit/wrangler-config.test.ts',
+    ],
     include: [
       'tests/unit/**/*.test.ts',
       'tests/integration/**/*.test.ts',

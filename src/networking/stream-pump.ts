@@ -5,7 +5,7 @@ const BYOB_READ_LIMIT = 64 * 1024;
 
 export interface Sendable {
   readonly readyState: number;
-  send(data: ArrayBuffer | ArrayBufferView): void;
+  send(data: ArrayBuffer | ArrayBufferView): void | Promise<void>;
   close?(): void;
 }
 
@@ -26,16 +26,9 @@ export interface DownlinkSender {
   flush(): Promise<void>;
 }
 
-function wsSendAndAwait(ws: Sendable, data: Uint8Array | ArrayBuffer): Promise<void> {
+async function wsSendAndAwait(ws: Sendable, data: Uint8Array | ArrayBuffer): Promise<void> {
   if (ws.readyState !== WebSocket.OPEN) throw new Error('ws.readyState is not open');
-  return new Promise<void>((resolve, reject) => {
-    try {
-      ws.send(data);
-      resolve();
-    } catch (err) {
-      reject(err instanceof Error ? err : new Error(String(err)));
-    }
-  });
+  await ws.send(data);
 }
 
 export function createDownloadGrainSender(

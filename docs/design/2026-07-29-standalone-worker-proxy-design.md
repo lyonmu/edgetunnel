@@ -189,7 +189,7 @@ interface WorkerConfigV1 {
     trojan: { enabled: boolean };
     shadowsocks: {
       enabled: boolean;
-      method: 'aes-128-gcm' | 'aes-256-gcm' | 'chacha20-poly1305';
+      method: 'aes-128-gcm' | 'aes-256-gcm';
     };
   };
   transports: {

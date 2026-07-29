@@ -59,5 +59,12 @@ export async function handleSubscriptionRequest(context: RequestContext): Promis
   if (!context.userAgent.toLowerCase().includes('mozilla')) {
     headers.set('Content-Disposition', `attachment; filename="edgetunnel-${format}"`);
   }
-  return new Response(serializeSubscription(format, nodes), { status: 200, headers });
+  try {
+    return new Response(serializeSubscription(format, nodes), { status: 200, headers });
+  } catch (error) {
+    return new Response(error instanceof Error ? error.message : '订阅序列化失败', {
+      status: 422,
+      headers,
+    });
+  }
 }

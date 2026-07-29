@@ -72,6 +72,17 @@ export async function camouflageResponse(
     try {
       const target = new URL(`${context.url.pathname}${context.url.search}`, origin);
       const headers = new Headers(context.request.headers);
+      for (const name of [
+        'Authorization',
+        'Cookie',
+        'Proxy-Authorization',
+        'CF-Connecting-IP',
+        'True-Client-IP',
+        'X-Forwarded-For',
+        'X-Real-IP',
+      ]) {
+        headers.delete(name);
+      }
       headers.set('Referer', origin.origin);
       headers.set('Origin', origin.origin);
       const method = context.request.method;

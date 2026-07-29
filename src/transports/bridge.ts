@@ -5,8 +5,12 @@ import { parseTrojanRequest } from '../protocols/trojan';
 
 export interface TransportBridge {
   readyState: number;
-  send(data: Uint8Array | ArrayBuffer): void;
+  send(data: Uint8Array | ArrayBuffer): void | Promise<void>;
   close(): void;
+}
+
+export interface PullAwareBridge extends TransportBridge {
+  notifyPull(): void;
 }
 
 export function createWebSocketBridge(ws: WebSocket): TransportBridge {
@@ -29,24 +33,65 @@ export function createWebSocketBridge(ws: WebSocket): TransportBridge {
   };
 }
 
-export function createResponseBridge(controller: ReadableStreamDefaultController): TransportBridge {
+export function createResponseBridge(controller: ReadableStreamDefaultController): PullAwareBridge {
+  const maxQueuedBytes = 1024 * 1024;
   let closed = false;
+  let queuedBytes = 0;
+  const queue: Array<{
+    chunk: Uint8Array;
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }> = [];
+
+  const flush = () => {
+    while (!closed && queue.length && (controller.desiredSize ?? 1) > 0) {
+      const item = queue.shift()!;
+      queuedBytes -= item.chunk.byteLength;
+      try {
+        controller.enqueue(item.chunk);
+        item.resolve();
+      } catch (error) {
+        closed = true;
+        item.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+  };
+
   return {
-    readyState: WebSocket.OPEN,
+    get readyState() {
+      return closed ? WebSocket.CLOSED : WebSocket.OPEN;
+    },
     send(data) {
       if (closed) return;
-      try {
-        const chunk = data instanceof Uint8Array ? data : new Uint8Array(data);
-        controller.enqueue(chunk);
-      } catch {
-        closed = true;
-        this.readyState = WebSocket.CLOSED;
+      const chunk = data instanceof Uint8Array ? data.slice() : new Uint8Array(data);
+      if (!queue.length && (controller.desiredSize ?? 1) > 0) {
+        try {
+          controller.enqueue(chunk);
+          return;
+        } catch {
+          closed = true;
+          return;
+        }
       }
+      if (queuedBytes + chunk.byteLength > maxQueuedBytes) {
+        const error = new Error('response bridge queue limit exceeded');
+        this.close();
+        return Promise.reject(error);
+      }
+      queuedBytes += chunk.byteLength;
+      return new Promise<void>((resolve, reject) => {
+        queue.push({ chunk, resolve, reject });
+      });
+    },
+    notifyPull() {
+      flush();
     },
     close() {
       if (closed) return;
       closed = true;
-      this.readyState = WebSocket.CLOSED;
+      const error = new Error('response bridge closed');
+      for (const item of queue.splice(0)) item.reject(error);
+      queuedBytes = 0;
       try {
         controller.close();
       } catch {

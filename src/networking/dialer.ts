@@ -2,6 +2,9 @@ import type { WorkerConfigV1, InboundProtocol } from '../config/schema';
 import type { RuntimeSnapshot } from '../config/runtime';
 import type { ProfileCredential } from '../security/secret-store';
 import type { ConnectorRegistry, DialResult, DialTarget } from './connectors/types';
+import { resolveDns } from './dns';
+
+export type TargetResolver = (hostname: string, dohUrl: string) => Promise<readonly string[]>;
 
 export type RouteDecision =
   | { type: 'use'; profileId: string; ruleId?: string }
@@ -10,6 +13,7 @@ export type RouteDecision =
 export interface DialerDependencies {
   registry: ConnectorRegistry;
   resolveCredential(ref: string): Promise<ProfileCredential | null>;
+  resolveTarget: TargetResolver;
 }
 
 export interface Dialer {
@@ -103,15 +107,11 @@ export function selectRoute(
 function isPrivateTarget(hostname: string): boolean {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (normalized === 'localhost' || normalized === '::1' || normalized === '::') return true;
-  if (
-    normalized.startsWith('fc') ||
-    normalized.startsWith('fd') ||
-    normalized.startsWith('fe8') ||
-    normalized.startsWith('fe9') ||
-    normalized.startsWith('fea') ||
-    normalized.startsWith('feb')
-  ) {
-    return true;
+  if (normalized.includes(':')) {
+    const first = Number.parseInt(normalized.split(':')[0] || '0', 16);
+    return (
+      (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00
+    );
   }
   const address = ipv4Number(normalized);
   if (address === null) return false;
@@ -130,6 +130,24 @@ function isPrivateTarget(hostname: string): boolean {
   ].some((cidr) => cidrMatches(normalized, cidr));
 }
 
+function isIpLiteral(hostname: string): boolean {
+  const normalized = hostname.replace(/^\[|\]$/g, '');
+  return ipv4Number(normalized) !== null || normalized.includes(':');
+}
+
+export async function resolveTargetAddresses(
+  hostname: string,
+  dohUrl: string,
+): Promise<readonly string[]> {
+  const [ipv4, ipv6] = await Promise.all([
+    resolveDns(hostname, 'A', dohUrl),
+    resolveDns(hostname, 'AAAA', dohUrl),
+  ]);
+  return [...ipv4, ...ipv6]
+    .filter((answer) => answer.type === 'A' || answer.type === 'AAAA')
+    .map((answer) => answer.data);
+}
+
 function abortError(): DOMException {
   return new DOMException('连接已取消', 'AbortError');
 }
@@ -145,6 +163,15 @@ export function createDialer(snapshot: RuntimeSnapshot, dependencies: DialerDepe
       if (signal.aborted) throw abortError();
       if (snapshot.config.routing.blockPrivateTargets && isPrivateTarget(target.hostname)) {
         throw new BlockedTargetError(target);
+      }
+      if (snapshot.config.routing.blockPrivateTargets && !isIpLiteral(target.hostname)) {
+        const addresses = await dependencies.resolveTarget(
+          target.hostname,
+          snapshot.config.dns.dohUrl,
+        );
+        if (!addresses.length || addresses.some(isPrivateTarget)) {
+          throw new BlockedTargetError(target);
+        }
       }
       const decision = selectRoute(target, inbound, snapshot.config);
       if (decision.type === 'block') throw new BlockedTargetError(target);

@@ -30,11 +30,15 @@ Preview 和 Production 必须使用不同 KV 与 Secret。不要复制真实代�
 - 配置使用 revision 乐观并发控制；
 - 配置错误对 API 返回 request ID，公共伪装页不暴露缺失 Secret 名称。
 
+Workers KV 不提供跨 key 事务或原子 compare-and-swap。revision 能检测已可见的陈旧写入，但不能保证两个跨 PoP 同时提交的管理请求被串行化；因此生产环境应保持单一管理者、避免同时保存。凭据变更会合并为一次 KV 写入，并且只在 revision 校验和配置保存后执行。若未来需要多管理员强一致写入，应把管理写路径迁移到 Durable Object 或 D1 事务。
+
 建议在 Cloudflare 中对 `/login` 和 `/api/admin/*` 配置速率限制；如果后台只由固定身份使用，可额外加 Cloudflare Access，但须确认代理数据面路径不受 Access 拦截。
 
 ## 数据面限制
 
-默认阻止私网、loopback、link-local 和其他不可公开路由目标，降低 SSRF 风险。只有显式启用的入站、传输、profile 和路由规则才参与运行。
+默认阻止私网、loopback、link-local 和其他不可公开路由目标，降低 SSRF 风险。域名目标在拨号前通过配置的 DoH 解析并校验 A/AAAA；解析失败或任一结果属于私网时按失败关闭处理。只有显式启用的入站、传输、profile 和路由规则才参与运行。
+
+DNS UDP 转发遵守 `dns.enabled`、`dohUrl`、`timeoutMs` 和 `maxMessageBytes`，并限制单连接数据报数量。关闭 DNS 后，VLESS/Trojan UDP DNS 请求会被拒绝。
 
 代理服务会把客户端流量转发到目标或链式代理。部署者必须确保用途合法、凭据已授权，并避免建立开放代理。
 

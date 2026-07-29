@@ -15,7 +15,7 @@ describe('TransportBridge', () => {
     } as any;
     const bridge = createResponseBridge(controller);
     expect(bridge.readyState).toBe(1); // WebSocket.OPEN
-    bridge.send(new Uint8Array([1, 2, 3]));
+    void bridge.send(new Uint8Array([1, 2, 3]));
     expect(enqueued.length).toBe(1);
     expect(enqueued[0]).toEqual(new Uint8Array([1, 2, 3]));
   });
@@ -32,7 +32,7 @@ describe('TransportBridge', () => {
     const controller = { enqueue: vi.fn(), close: vi.fn() } as any;
     const bridge = createResponseBridge(controller);
     bridge.close();
-    bridge.send(new Uint8Array([1]));
+    void bridge.send(new Uint8Array([1]));
     expect(controller.enqueue).not.toHaveBeenCalled();
   });
 });

@@ -65,10 +65,19 @@ describe('subscription node model', () => {
     expect(mixed).toContain('serviceName=edgetunnel');
     expect(mixed).toContain('mode=stream-one');
     expect(decodeURIComponent(mixed)).toContain('mux=0');
+    expect(decodeURIComponent(mixed)).toContain('path=/ws?enc=aes-128-gcm');
     for (const output of outputs) {
       expect(output).not.toContain('admin-must-not-leak');
       expect(output).not.toContain('config-key-must-not-leak');
       expect(output).not.toContain('credentialRef');
     }
+  });
+
+  it('rejects a Surge document when no supported node remains', () => {
+    const configSnapshot = snapshot();
+    configSnapshot.config.inbound.trojan.enabled = false;
+    const nodes = buildSubscriptionNodes(configSnapshot, new URL('https://fallback.example/sub'));
+
+    expect(() => serializeSurge(nodes)).toThrow('没有 Surge 支持');
   });
 });

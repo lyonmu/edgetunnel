@@ -183,7 +183,7 @@ function validateInbound(value: unknown, issues: ConfigIssue[]): void {
     expectEnum(
       shadowsocks.method,
       `${path}/shadowsocks/method`,
-      ['aes-128-gcm', 'aes-256-gcm', 'chacha20-poly1305'],
+      ['aes-128-gcm', 'aes-256-gcm'],
       issues,
     );
   }

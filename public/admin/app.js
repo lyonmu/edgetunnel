@@ -60,6 +60,12 @@ function render(next) {
   byId('routing-default').value = next.routing.defaultProfileId;
   byId('block-private').checked = next.routing.blockPrivateTargets;
   byId('routing-rules').value = pretty(next.routing.rules);
+  byId('subscription-enabled').checked = next.subscription.enabled;
+  byId('subscription-base').value = next.subscription.publicBaseUrl || '';
+  byId('subscription-formats').value = JSON.stringify(next.subscription.formats);
+  byId('camouflage-url').value = next.site.camouflageUrl || '';
+  byId('observability-level').value = next.observability.logLevel;
+  byId('observability-retention').value = next.observability.retention;
 }
 
 async function loadConfig() {
@@ -89,6 +95,16 @@ function collectConfig() {
   next.routing.defaultProfileId = byId('routing-default').value.trim();
   next.routing.blockPrivateTargets = byId('block-private').checked;
   next.routing.rules = JSON.parse(byId('routing-rules').value);
+  next.subscription.enabled = byId('subscription-enabled').checked;
+  const publicBaseUrl = byId('subscription-base').value.trim();
+  if (publicBaseUrl) next.subscription.publicBaseUrl = publicBaseUrl;
+  else delete next.subscription.publicBaseUrl;
+  next.subscription.formats = JSON.parse(byId('subscription-formats').value);
+  const camouflageUrl = byId('camouflage-url').value.trim();
+  if (camouflageUrl) next.site.camouflageUrl = camouflageUrl;
+  else delete next.site.camouflageUrl;
+  next.observability.logLevel = byId('observability-level').value;
+  next.observability.retention = Number(byId('observability-retention').value);
   return next;
 }
 
@@ -138,7 +154,8 @@ byId('preview').addEventListener('click', async () => {
   const format = encodeURIComponent(byId('preview-format').value);
   try {
     const body = await api(`/api/admin/v1/subscriptions/preview?format=${format}`);
-    byId('preview-output').textContent = body.data.content;
+    byId('preview-output').textContent =
+      `订阅地址：${body.data.subscriptionUrl}\n\n${body.data.content}`;
   } catch (error) {
     byId('preview-output').textContent = error.message;
   }

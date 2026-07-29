@@ -6,6 +6,8 @@ import { XudpDecoder, encodeXudpDatagram } from './xudp';
 const DNS_SERVER = { hostname: '8.8.4.4', port: 53 } as const;
 const DNS_DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query';
 const DNS_TIMEOUT_MS = 10_000;
+const DNS_MAX_MESSAGE_BYTES = 4_096;
+const DNS_MAX_DATAGRAMS_PER_SESSION = 128;
 
 export type DnsQuery = (payload: Uint8Array) => Promise<Uint8Array>;
 export type DnsUdpProtocol = 'vless' | 'vless-packetaddr' | 'vless-xudp' | 'trojan';
@@ -15,13 +17,17 @@ export function isVlessPacketAddrTarget(hostname: string, port: number): boolean
   return port === 443 && hostname.toLowerCase() === 'sp.packet-addr.v2fly.arpa';
 }
 
-async function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  message: string,
+  timeoutMs = DNS_TIMEOUT_MS,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), DNS_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
       }),
     ]);
   } finally {
@@ -88,10 +94,17 @@ export async function queryDnsTcp(
 export async function queryDnsDoh(
   payload: Uint8Array,
   fetcher: DnsFetcher = fetch,
+  options: {
+    endpoint?: string;
+    timeoutMs?: number;
+    maxMessageBytes?: number;
+  } = {},
 ): Promise<Uint8Array> {
   if (!payload.byteLength) throw new Error('DNS query is empty');
+  const maxMessageBytes = options.maxMessageBytes ?? DNS_MAX_MESSAGE_BYTES;
+  if (payload.byteLength > maxMessageBytes) throw new Error('DNS query exceeds configured limit');
   const response = await withTimeout(
-    fetcher(DNS_DOH_ENDPOINT, {
+    fetcher(options.endpoint ?? DNS_DOH_ENDPOINT, {
       method: 'POST',
       headers: {
         Accept: 'application/dns-message',
@@ -100,11 +113,16 @@ export async function queryDnsDoh(
       body: new Uint8Array(payload),
     }),
     'DNS-over-HTTPS query timed out',
+    options.timeoutMs,
   );
   if (!response.ok) {
     throw new Error(`DNS-over-HTTPS query failed: ${response.status}`);
   }
-  return new Uint8Array(await response.arrayBuffer());
+  const result = new Uint8Array(await response.arrayBuffer());
+  if (result.byteLength > maxMessageBytes) {
+    throw new Error('DNS response exceeds configured limit');
+  }
+  return result;
 }
 
 function dnsFrame(payload: Uint8Array): Uint8Array {
@@ -115,7 +133,9 @@ function dnsFrame(payload: Uint8Array): Uint8Array {
 }
 
 function send(bridge: TransportBridge, payload: Uint8Array): void {
-  if (bridge.readyState === WebSocket.OPEN && payload.byteLength) bridge.send(payload);
+  if (bridge.readyState === WebSocket.OPEN && payload.byteLength) {
+    void Promise.resolve(bridge.send(payload)).catch(() => bridge.close());
+  }
 }
 
 export function createDnsUdpSession(
@@ -123,10 +143,28 @@ export function createDnsUdpSession(
   bridge: TransportBridge,
   responseHeader: Uint8Array | null,
   query: DnsQuery = queryDnsDoh,
+  options: {
+    maxMessageBytes?: number;
+    maxDatagrams?: number;
+  } = {},
 ) {
   let pending: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   let header = responseHeader;
   const xudpDecoder = protocol === 'vless-xudp' ? new XudpDecoder() : null;
+  const maxMessageBytes = options.maxMessageBytes ?? DNS_MAX_MESSAGE_BYTES;
+  const maxDatagrams = options.maxDatagrams ?? DNS_MAX_DATAGRAMS_PER_SESSION;
+  let datagramCount = 0;
+
+  const checkedQuery = async (payload: Uint8Array): Promise<Uint8Array> => {
+    datagramCount += 1;
+    if (datagramCount > maxDatagrams) throw new Error('DNS session datagram limit exceeded');
+    if (payload.byteLength > maxMessageBytes) throw new Error('DNS query exceeds configured limit');
+    const response = await query(payload);
+    if (response.byteLength > maxMessageBytes) {
+      throw new Error('DNS response exceeds configured limit');
+    }
+    return response;
+  };
 
   const sendFramedResponse = (framed: Uint8Array) => {
     if (!header) {
@@ -144,7 +182,7 @@ export function createDnsUdpSession(
       if (pending.byteLength < length + 2) return;
       const payload = new Uint8Array(pending.slice(2, length + 2));
       pending = pending.slice(length + 2);
-      sendResponse(await query(payload));
+      sendResponse(await checkedQuery(payload));
     }
   };
 
@@ -176,7 +214,7 @@ export function createDnsUdpSession(
       const addressAndPort = packet.slice(0, portOffset + 2);
       const payload = packet.slice(portOffset + 2);
       if (!payload.byteLength) continue;
-      const response = await query(payload);
+      const response = await checkedQuery(payload);
       sendResponse(new Uint8Array(concatBytes(addressAndPort, response)));
     }
   };
@@ -218,7 +256,7 @@ export function createDnsUdpSession(
       }
       if (!payload.byteLength) continue;
 
-      const response = await query(payload);
+      const response = await checkedQuery(payload);
       const frame = new Uint8Array(addressAndPort.byteLength + response.byteLength + 4);
       frame.set(addressAndPort);
       new DataView(frame.buffer).setUint16(addressAndPort.byteLength, response.byteLength);
@@ -233,7 +271,7 @@ export function createDnsUdpSession(
     for (const datagram of xudpDecoder!.push(chunk)) {
       if (datagram.destination.port !== 53) throw new Error('UDP is not supported');
       if (!datagram.payload.byteLength) continue;
-      const response = await query(datagram.payload);
+      const response = await checkedQuery(datagram.payload);
       sendFramedResponse(
         encodeXudpDatagram({
           status: 'keep',

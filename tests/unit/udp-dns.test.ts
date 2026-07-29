@@ -35,6 +35,32 @@ describe('DNS UDP session', () => {
     );
   });
 
+  it('uses the configured DoH endpoint and message limit', async () => {
+    const fetcher = vi.fn(async () => new Response(new Uint8Array([4, 5])));
+
+    await expect(
+      queryDnsDoh(new Uint8Array([1, 2]), fetcher, {
+        endpoint: 'https://dns.example/dns-query',
+        timeoutMs: 500,
+        maxMessageBytes: 2,
+      }),
+    ).resolves.toEqual(new Uint8Array([4, 5]));
+    expect(fetcher).toHaveBeenCalledWith('https://dns.example/dns-query', expect.anything());
+    await expect(
+      queryDnsDoh(new Uint8Array([1, 2, 3]), fetcher, { maxMessageBytes: 2 }),
+    ).rejects.toThrow('configured limit');
+  });
+
+  it('limits the number of datagrams in one DNS session', async () => {
+    const { bridge } = collectingBridge();
+    const session = createDnsUdpSession('vless', bridge, null, async (payload) => payload, {
+      maxDatagrams: 1,
+    });
+
+    await session.push(new Uint8Array([0, 1, 1]));
+    await expect(session.push(new Uint8Array([0, 1, 2]))).rejects.toThrow('datagram limit');
+  });
+
   it('buffers fragmented VLESS UDP frames and sends the response header once', async () => {
     const { bridge, sent } = collectingBridge();
     const query = vi.fn(async (payload: Uint8Array) => new Uint8Array([...payload, 9]));

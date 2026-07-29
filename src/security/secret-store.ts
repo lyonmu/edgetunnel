@@ -16,6 +16,10 @@ function assertCredentialRef(ref: string): void {
   }
 }
 
+export function validateCredentialRef(ref: string): void {
+  assertCredentialRef(ref);
+}
+
 function assertCredential(value: unknown): asserts value is ProfileCredential {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('凭据必须是对象');
@@ -38,6 +42,11 @@ function assertCredential(value: unknown): asserts value is ProfileCredential {
   ) {
     throw new Error('凭据 username 长度不能超过 512');
   }
+}
+
+export function validateProfileCredential(ref: string, credential: ProfileCredential): void {
+  validateCredentialRef(ref);
+  assertCredential(credential);
 }
 
 function isEnvelope(value: unknown): value is EncryptedEnvelope {
@@ -90,17 +99,30 @@ export class SecretStore {
   }
 
   async write(ref: string, credential: ProfileCredential): Promise<void> {
-    assertCredentialRef(ref);
-    assertCredential(credential);
-    const document = await this.loadDocument();
-    document[ref] = await encryptJson(this.encryptionKey, `${SECRET_STORE_KEY}:${ref}`, credential);
-    await this.kv.put(SECRET_STORE_KEY, JSON.stringify(document));
+    await this.apply({ [ref]: credential });
   }
 
   async delete(ref: string): Promise<void> {
-    assertCredentialRef(ref);
+    await this.apply({ [ref]: null });
+  }
+
+  async apply(changes: Readonly<Record<string, ProfileCredential | null>>): Promise<void> {
+    for (const [ref, credential] of Object.entries(changes)) {
+      if (credential === null) assertCredentialRef(ref);
+      else validateProfileCredential(ref, credential);
+    }
     const document = await this.loadDocument();
-    delete document[ref];
+    for (const [ref, credential] of Object.entries(changes)) {
+      if (credential === null) {
+        delete document[ref];
+      } else {
+        document[ref] = await encryptJson(
+          this.encryptionKey,
+          `${SECRET_STORE_KEY}:${ref}`,
+          credential,
+        );
+      }
+    }
     await this.kv.put(SECRET_STORE_KEY, JSON.stringify(document));
   }
 }

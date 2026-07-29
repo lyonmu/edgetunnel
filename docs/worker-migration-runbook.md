@@ -34,7 +34,7 @@ Production 和 Preview 分别设置以下 Secret：
 - `TROJAN_PASSWORD`
 - `SHADOWSOCKS_PASSWORD`
 
-`wrangler.jsonc` 通过 `secrets.required` 声明名称并在部署前验证是否存在，但不保存值。`CONFIG_KEY` 必须是 32 字节 base64url；丢失后将无法解密已保存在 KV 中的代理凭据。
+`wrangler.jsonc` 通过 `secrets.required` 声明名称，用于类型生成和本地缺失提示，但它不替代远端 Secret 审计。部署前必须分别执行 `wrangler secret list` 检查 Production 与 Preview。`CONFIG_KEY` 必须是 32 字节 base64url；丢失后将无法解密已保存在 KV 中的代理凭据。
 
 使用 Cloudflare 控制台添加最安全。若使用 CLI，避免把值放在命令行参数或 shell 历史中：
 
@@ -47,6 +47,13 @@ npx wrangler secret put SHADOWSOCKS_PASSWORD --env preview
 ```
 
 Production 使用相同命令但省略 `--env preview`。Preview 必须使用不同的 `ADMIN`、`CONFIG_KEY` 和协议凭据。
+
+部署前审计名称（命令不会返回 Secret 值）：
+
+```bash
+npx wrangler secret list --env preview
+npx wrangler secret list
+```
 
 ## Cloudflare Workers Builds
 

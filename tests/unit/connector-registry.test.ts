@@ -137,4 +137,25 @@ describe('connector registry', () => {
       { allowHalfOpen: true },
     );
   });
+
+  it('aborts a connector handshake and closes a socket that arrives late', async () => {
+    const socket = fakeSocket();
+    let finish!: (socket: Socket) => void;
+    const socks5Connect = vi.fn(
+      () =>
+        new Promise<Socket>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const registry = createConnectorRegistry({ socks5Connect });
+    const controller = new AbortController();
+    const connection = registry
+      .get('socks5')
+      .connect(target, addressProfile('socks5'), credential, controller.signal);
+
+    controller.abort();
+    await expect(connection).rejects.toMatchObject({ name: 'AbortError' });
+    finish(socket);
+    await vi.waitFor(() => expect(socket.close).toHaveBeenCalledOnce());
+  });
 });

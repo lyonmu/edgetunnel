@@ -28,7 +28,7 @@
         <a href="#dns">DNS</a>
         <a href="#egress">出站 Profile</a>
         <a href="#routing">路由规则</a>
-        <a href="#subscription">订阅预览</a>
+        <a href="#subscription">订阅与站点</a>
         <a href="#logs">安全日志</a>
       </nav>
 
@@ -63,7 +63,6 @@
                 <select id="ss-method">
                   <option value="aes-128-gcm">aes-128-gcm</option>
                   <option value="aes-256-gcm">aes-256-gcm</option>
-                  <option value="chacha20-poly1305">chacha20-poly1305</option>
                 </select>
               </label>
             </fieldset>
@@ -121,7 +120,13 @@
         </section>
 
         <section id="subscription" class="panel">
-          <div class="section-heading"><div><p class="eyebrow">Subscription</p><h2>订阅预览</h2></div></div>
+          <div class="section-heading"><div><p class="eyebrow">Subscription</p><h2>订阅与站点</h2></div></div>
+          <div class="form-grid">
+            <label class="toggle"><input id="subscription-enabled" type="checkbox" /> 启用订阅</label>
+            <label>公开基础 URL（可选）<input id="subscription-base" type="url" placeholder="https://proxy.example.com" /></label>
+            <label>启用格式（JSON 数组）<input id="subscription-formats" spellcheck="false" /></label>
+            <label>伪装站 URL（可选）<input id="camouflage-url" type="url" placeholder="https://www.example.com" /></label>
+          </div>
           <div class="inline-controls">
             <select id="preview-format">
               <option value="mixed">Mixed</option>
@@ -142,6 +147,16 @@
               <button id="refresh-logs" class="button secondary" type="button">刷新</button>
               <button id="clear-logs" class="button danger-button" type="button">清空</button>
             </div>
+          </div>
+          <div class="form-grid">
+            <label>日志级别
+              <select id="observability-level">
+                <option value="off">off</option>
+                <option value="error">error</option>
+                <option value="info">info</option>
+              </select>
+            </label>
+            <label>KV 日志保留条数 <input id="observability-retention" type="number" min="0" max="1000" required /></label>
           </div>
           <pre id="logs-output" class="output">尚未读取</pre>
         </section>

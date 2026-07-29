@@ -19,6 +19,7 @@ import { toUint8Array } from '../shared/bytes';
 import {
   createDnsUdpSession,
   isVlessPacketAddrTarget,
+  queryDnsDoh,
   type DnsUdpProtocol,
 } from '../networking/udp-dns';
 
@@ -67,9 +68,11 @@ export function handleWebSocket(
     name: 'WS上行',
   });
 
-  const bridge = shadowsocksMethod
-    ? createShadowsocksBridge(serverSock, ctx.userId, shadowsocksMethod)
-    : createWebSocketBridge(serverSock);
+  const shadowsocksPassword = ctx.runtimeSnapshot.secrets.shadowsocksPassword;
+  const bridge =
+    shadowsocksMethod && shadowsocksPassword
+      ? createShadowsocksBridge(serverSock, shadowsocksPassword, shadowsocksMethod)
+      : createWebSocketBridge(serverSock);
   const firstPacketReader = createFirstPacketReader(
     ctx.userId,
     ctx.runtimeSnapshot.secrets.trojanPassword,
@@ -77,13 +80,13 @@ export function handleWebSocket(
   if (
     shadowsocksMethod &&
     (!ctx.runtimeSnapshot.config.inbound.shadowsocks.enabled ||
-      shadowsocksMethod !== ctx.runtimeSnapshot.config.inbound.shadowsocks.method)
+      shadowsocksMethod !== ctx.runtimeSnapshot.config.inbound.shadowsocks.method ||
+      !shadowsocksPassword)
   ) {
     return new Response('Shadowsocks is not enabled', { status: 404 });
   }
-  const shadowsocksPassword = ctx.runtimeSnapshot.secrets.shadowsocksPassword ?? ctx.userId;
   const shadowsocksDecryptor = shadowsocksMethod
-    ? createShadowsocksDecryptor(shadowsocksPassword, shadowsocksMethod)
+    ? createShadowsocksDecryptor(shadowsocksPassword!, shadowsocksMethod)
     : null;
   const shadowsocksAddressReader = shadowsocksMethod ? createShadowsocksAddressReader() : null;
   let shadowsocksConnected = false;
@@ -140,11 +143,27 @@ export function handleWebSocket(
           }
           dnsProtocol = 'vless-packetaddr';
         }
-        dnsSession = createDnsSession(dnsProtocol, bridge, firstPacket.respHeader);
+        const dnsConfig = ctx.runtimeSnapshot.config.dns;
+        if (!dnsConfig.enabled) throw new Error('DNS is not enabled');
+        dnsSession =
+          createDnsSession === createDnsUdpSession
+            ? createDnsUdpSession(
+                dnsProtocol,
+                bridge,
+                firstPacket.respHeader,
+                (payload) =>
+                  queryDnsDoh(payload, fetch, {
+                    endpoint: dnsConfig.dohUrl,
+                    timeoutMs: dnsConfig.timeoutMs,
+                    maxMessageBytes: dnsConfig.maxMessageBytes,
+                  }),
+                { maxMessageBytes: dnsConfig.maxMessageBytes },
+              )
+            : createDnsSession(dnsProtocol, bridge, firstPacket.respHeader);
         if (firstPacket.rawData.byteLength) await dnsSession.push(firstPacket.rawData);
         return;
       }
-      if (firstPacket.respHeader) bridge.send(firstPacket.respHeader);
+      if (firstPacket.respHeader) await bridge.send(firstPacket.respHeader);
       await connectTCP(
         firstPacket.hostname,
         firstPacket.port,

@@ -60,10 +60,11 @@ describe('standalone admin UI', () => {
     ['/login/app.js', 'text/javascript'],
     ['/shared/styles.css', 'text/css'],
   ])('serves %s with its correct content type', async (path, contentType) => {
-    const response = await env.ASSETS.fetch(new Request(`${origin}${path}`));
+    const response = await fetchWorker(path);
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toContain(contentType);
+    expect(response.headers.get('Content-Security-Policy')).toContain("default-src 'self'");
   });
 
   it.each(['/admin/config.json', '/admin/log.json', '/admin/ADD.txt'])(

@@ -2,7 +2,7 @@ export const CONFIG_SCHEMA_VERSION = 1 as const;
 
 export type InboundProtocol = 'vless' | 'trojan' | 'shadowsocks';
 export type SubscriptionFormat = 'mixed' | 'base64' | 'clash' | 'singbox' | 'surge';
-export type ShadowsocksMethod = 'aes-128-gcm' | 'aes-256-gcm' | 'chacha20-poly1305';
+export type ShadowsocksMethod = 'aes-128-gcm' | 'aes-256-gcm';
 
 interface BaseEgressProfile {
   id: string;

@@ -11,6 +11,7 @@ import type { DataPlaneContext } from '../app/types';
 import {
   createDnsUdpSession,
   isVlessPacketAddrTarget,
+  queryDnsDoh,
   type DnsUdpProtocol,
 } from '../networking/udp-dns';
 
@@ -32,11 +33,12 @@ export function handleXHTTP(
   });
 
   let uploadQueueRef: ReturnType<typeof createUploadQueue> | null = null;
+  let responseBridgeRef: ReturnType<typeof createResponseBridge> | null = null;
 
   return new Response(
     new ReadableStream({
       async start(controller) {
-        const bridge = createResponseBridge(controller);
+        const bridge = (responseBridgeRef = createResponseBridge(controller));
 
         const uploadQueue = (uploadQueueRef = createUploadQueue({
           getWriter: writerProvider.getWriter,
@@ -97,10 +99,26 @@ export function handleXHTTP(
               }
               dnsProtocol = 'vless-packetaddr';
             }
-            dnsSession = createDnsSession(dnsProtocol, bridge, firstPacket.respHeader);
+            const dnsConfig = ctx.runtimeSnapshot.config.dns;
+            if (!dnsConfig.enabled) throw new Error('DNS is not enabled');
+            dnsSession =
+              createDnsSession === createDnsUdpSession
+                ? createDnsUdpSession(
+                    dnsProtocol,
+                    bridge,
+                    firstPacket.respHeader,
+                    (payload) =>
+                      queryDnsDoh(payload, fetch, {
+                        endpoint: dnsConfig.dohUrl,
+                        timeoutMs: dnsConfig.timeoutMs,
+                        maxMessageBytes: dnsConfig.maxMessageBytes,
+                      }),
+                    { maxMessageBytes: dnsConfig.maxMessageBytes },
+                  )
+                : createDnsSession(dnsProtocol, bridge, firstPacket.respHeader);
             if (firstPacket.rawData.byteLength) await dnsSession.push(firstPacket.rawData);
           } else {
-            if (firstPacket.respHeader) bridge.send(firstPacket.respHeader);
+            if (firstPacket.respHeader) await bridge.send(firstPacket.respHeader);
             await connectTCP(
               firstPacket.hostname,
               firstPacket.port,
@@ -150,6 +168,9 @@ export function handleXHTTP(
             /* ignore */
           }
         }
+      },
+      pull() {
+        responseBridgeRef?.notifyPull();
       },
       cancel() {
         uploadQueueRef?.clear();

@@ -1,9 +1,10 @@
-import { createExecutionContext, env } from 'cloudflare:test';
+import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import worker from '../../src/index';
 import { CONFIG_KEY } from '../../src/config/repository';
 import { SECRET_STORE_KEY } from '../../src/security/secret-store';
 import { encodeBase64Url } from '../../src/security/crypto';
+import { LOG_STORE_KEY } from '../../src/storage/log-repository';
 
 const uuid = '90cd4a77-141a-43c9-991b-08263cfe9c10';
 const origin = 'https://example.com';
@@ -38,9 +39,7 @@ async function loginCookie(): Promise<string> {
 describe('versioned admin API', () => {
   beforeEach(async () => {
     await Promise.all(
-      [CONFIG_KEY, SECRET_STORE_KEY, 'edgetunnel:logs:v1', 'config.json'].map((key) =>
-        env.KV.delete(key),
-      ),
+      [CONFIG_KEY, SECRET_STORE_KEY, LOG_STORE_KEY, 'config.json'].map((key) => env.KV.delete(key)),
     );
   });
 
@@ -67,6 +66,39 @@ describe('versioned admin API', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ data: { authenticated: true } });
+  });
+
+  it('writes a redacted security event for a denied login', async () => {
+    const execution = createExecutionContext();
+    const response = await worker.fetch(
+      new Request(`${origin}/api/admin/v1/session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: origin,
+          'CF-Connecting-IP': '203.0.113.42',
+        },
+        body: JSON.stringify({ password: 'wrong-password' }),
+      }),
+      testEnv(),
+      execution,
+    );
+    await waitOnExecutionContext(execution);
+
+    expect(response.status).toBe(401);
+    const logs = JSON.parse((await env.KV.get(LOG_STORE_KEY)) ?? '[]') as Array<{
+      type: string;
+      outcome: string;
+      details: { clientIp: string };
+    }>;
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        type: 'admin_login',
+        outcome: 'denied',
+        details: { clientIp: '203.0.113.0/24' },
+      }),
+    );
+    expect(JSON.stringify(logs)).not.toContain('wrong-password');
   });
 
   it('rejects unauthenticated config access', async () => {
@@ -118,6 +150,43 @@ describe('versioned admin API', () => {
     });
   });
 
+  it('does not mutate encrypted credentials for a stale config update', async () => {
+    const cookie = await loginCookie();
+    const initial = await fetchWorker('/api/admin/v1/config', {
+      headers: { Cookie: cookie },
+    });
+    const initialBody = (await initial.json()) as { data: { config: Record<string, unknown> } };
+    const config = structuredClone(initialBody.data.config);
+
+    const first = await fetchWorker('/api/admin/v1/config', {
+      method: 'PUT',
+      headers: {
+        Cookie: cookie,
+        Origin: origin,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ config, expectedRevision: 1 }),
+    });
+    expect(first.status).toBe(200);
+
+    const stale = await fetchWorker('/api/admin/v1/config', {
+      method: 'PUT',
+      headers: {
+        Cookie: cookie,
+        Origin: origin,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        config,
+        expectedRevision: 1,
+        credentials: { 'stale-credential': { username: 'user', password: 'secret' } },
+      }),
+    });
+
+    expect(stale.status).toBe(409);
+    expect(await env.KV.get(SECRET_STORE_KEY)).toBeNull();
+  });
+
   it('rejects cross-origin state changes', async () => {
     const cookie = await loginCookie();
     const response = await fetchWorker('/api/admin/v1/config', {
@@ -158,11 +227,39 @@ describe('versioned admin API', () => {
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    const body = (await response.json()) as {
+      data: { format: string; nodeCount: number; subscriptionUrl: string };
+    };
+    expect(body).toMatchObject({
       data: {
         format: 'clash',
         nodeCount: 1,
       },
+    });
+    const subscriptionUrl = new URL(body.data.subscriptionUrl);
+    expect(subscriptionUrl.origin).toBe(origin);
+    expect(subscriptionUrl.pathname).toBe('/sub');
+    expect(subscriptionUrl.searchParams.get('format')).toBe('clash');
+    expect(subscriptionUrl.searchParams.get('token')).toMatch(/^v1\./);
+    expect(body.data.subscriptionUrl).not.toContain(uuid);
+    expect(body.data.subscriptionUrl).not.toContain('admin');
+  });
+
+  it('returns not found for an unknown profile test', async () => {
+    const cookie = await loginCookie();
+    const response = await fetchWorker('/api/admin/v1/profiles/missing/test', {
+      method: 'POST',
+      headers: {
+        Cookie: cookie,
+        Origin: origin,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'PROFILE_NOT_FOUND' },
     });
   });
 });

@@ -45,16 +45,22 @@ describe('pure Worker HTTP fallback routes', () => {
     const config = createDefaultConfig();
     config.site.camouflageUrl = 'https://origin.example';
     await env.KV.put(CONFIG_KEY, JSON.stringify(config));
-    const fetchMock = vi.fn(
-      async () =>
-        new Response('<a href="https://origin.example/path">origin.example</a>', {
-          headers: { 'Content-Type': 'text/html', 'Content-Length': '64' },
-        }),
-    );
+    const fetchMock = vi.fn(async (request: Request) => {
+      expect(request).toBeInstanceOf(Request);
+      return new Response('<a href="https://origin.example/path">origin.example</a>', {
+        headers: { 'Content-Type': 'text/html', 'Content-Length': '64' },
+      });
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await worker.fetch(
-      new Request('https://worker.example/path?q=1'),
+      new Request('https://worker.example/path?q=1', {
+        headers: {
+          Cookie: 'edt_session=must-not-leak',
+          Authorization: 'Bearer must-not-leak',
+          'CF-Connecting-IP': '203.0.113.10',
+        },
+      }),
       baseEnv,
       createExecutionContext(),
     );
@@ -65,6 +71,10 @@ describe('pure Worker HTTP fallback routes', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       expect.objectContaining({ url: 'https://origin.example/path?q=1' }),
     );
+    const upstreamRequest = fetchMock.mock.calls[0]![0];
+    expect(upstreamRequest.headers.has('Cookie')).toBe(false);
+    expect(upstreamRequest.headers.has('Authorization')).toBe(false);
+    expect(upstreamRequest.headers.has('CF-Connecting-IP')).toBe(false);
   });
 
   it('uses the local nginx page when camouflage is not configured', async () => {

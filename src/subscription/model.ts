@@ -26,6 +26,11 @@ function publicEndpoint(snapshot: RuntimeSnapshot, requestUrl: URL): URL {
   return url;
 }
 
+function shadowsocksWebSocketPath(path: string, method: ShadowsocksMethod): string {
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}enc=${encodeURIComponent(method)}`;
+}
+
 export function buildSubscriptionNodes(
   snapshot: RuntimeSnapshot,
   requestUrl: URL,
@@ -108,7 +113,7 @@ export function buildSubscriptionNodes(
       transport: 'ws',
       password: snapshot.secrets.shadowsocksPassword,
       method: inbound.shadowsocks.method,
-      path: transports.websocket.path,
+      path: shadowsocksWebSocketPath(transports.websocket.path, inbound.shadowsocks.method),
     });
   }
   return nodes;
@@ -286,6 +291,9 @@ function surgeProxy(node: SubscriptionNode): string | null {
 
 export function serializeSurge(nodes: readonly SubscriptionNode[]): string {
   const proxies = nodes.map(surgeProxy).filter((line) => line !== null);
+  if (!proxies.length) {
+    throw new Error('当前节点没有 Surge 支持的协议与传输组合');
+  }
   return [
     '[Proxy]',
     ...proxies,
