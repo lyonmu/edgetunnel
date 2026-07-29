@@ -7,8 +7,14 @@ import {
   writeInitialData,
   cloudflareSocketConnector,
   type DialCandidate,
+  type SocketConnector,
 } from './sockets';
 import { socks5Connect, httpConnect, httpsConnect } from './proxy-connectors';
+import { isIPHostname } from './proxy-connectors';
+import { resolveProxyCandidates, type DnsResolver } from './proxy-ip';
+import { resolveDns } from './dns';
+import { turnConnect } from './turn';
+import { sstpConnect } from './sstp';
 
 export type ConnectTCPFn = (
   host: string,
@@ -18,34 +24,109 @@ export type ConnectTCPFn = (
   wrapper: RemoteConnWrapper,
 ) => Promise<void>;
 
+type StreamConnector = typeof connectStreams;
+
+export interface ConnectTCPDependencies {
+  connector?: SocketConnector;
+  connectStreams?: StreamConnector;
+  socks5Connect?: typeof socks5Connect;
+  httpConnect?: typeof httpConnect;
+  httpsConnect?: typeof httpsConnect;
+  turnConnect?: typeof turnConnect;
+  sstpConnect?: typeof sstpConnect;
+  resolveDns?: DnsResolver;
+  resolveProxyCandidates?: (
+    proxyIp: string,
+    targetHost: string,
+    userId: string,
+    resolver?: DnsResolver,
+  ) => Promise<DialCandidate[]>;
+}
+
 const CONNECT_TIMEOUT_MS = 1000;
 
-export function createConnectTCP(ctx: RequestContext): ConnectTCPFn {
-  const connector = cloudflareSocketConnector;
-  const dialConcurrency = ctx.dialConcurrency;
-  let sentViaProxy = false;
+function matchesWhitelist(host: string, whitelist: readonly string[]): boolean {
+  return whitelist.some((pattern) => {
+    const expression = pattern
+      .split('*')
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.*');
+    return new RegExp(`^${expression}$`, 'i').test(host);
+  });
+}
+
+export function createConnectTCP(
+  ctx: RequestContext,
+  dependencies: ConnectTCPDependencies = {},
+): ConnectTCPFn {
+  const connector = dependencies.connector ?? cloudflareSocketConnector;
+  const pumpStreams = dependencies.connectStreams ?? connectStreams;
+  const connectSocks5 = dependencies.socks5Connect ?? socks5Connect;
+  const connectHttp = dependencies.httpConnect ?? httpConnect;
+  const connectHttps = dependencies.httpsConnect ?? httpsConnect;
+  const connectTurn = dependencies.turnConnect ?? turnConnect;
+  const connectSstp = dependencies.sstpConnect ?? sstpConnect;
+  const dnsResolver = dependencies.resolveDns ?? resolveDns;
+  const resolveCandidates = dependencies.resolveProxyCandidates ?? resolveProxyCandidates;
+  const dialConcurrency = Math.max(1, ctx.dialConcurrency);
+
+  async function connectCandidates(
+    candidates: readonly DialCandidate[],
+    data: Uint8Array | null,
+  ): Promise<Socket> {
+    let lastError: unknown = new Error('没有可用的拨号候选');
+    for (let offset = 0; offset < candidates.length; offset += dialConcurrency) {
+      const batch = candidates.slice(offset, offset + dialConcurrency);
+      let socket: Socket | null = null;
+      try {
+        if (batch.length === 1) {
+          socket = await openSocket(connector, batch[0]!, CONNECT_TIMEOUT_MS);
+        } else {
+          socket = (await raceSockets(connector, batch, CONNECT_TIMEOUT_MS)).socket;
+        }
+        if (data && data.byteLength > 0) await writeInitialData(socket, data);
+        return socket;
+      } catch (error) {
+        lastError = error;
+        if (socket) void socket.close().catch(() => undefined);
+      }
+    }
+    throw lastError;
+  }
 
   async function connectDirect(
     host: string,
     port: number,
     data: Uint8Array | null,
   ): Promise<Socket> {
-    const candidates: DialCandidate[] = Array.from({ length: dialConcurrency }, (_, i) => ({
-      hostname: host,
-      port,
-      index: i,
-    }));
-    let socket: Socket;
-    if (candidates.length === 1) {
-      socket = await openSocket(connector, candidates[0]!, CONNECT_TIMEOUT_MS);
-    } else {
-      const result = await raceSockets(connector, candidates, CONNECT_TIMEOUT_MS);
-      socket = result.socket;
+    let candidates: DialCandidate[] = [];
+    if (ctx.preloadRaceDial && !isIPHostname(host)) {
+      const [ipv4Answers, ipv6Answers] = await Promise.all([
+        dnsResolver(host, 'A'),
+        dnsResolver(host, 'AAAA'),
+      ]);
+      const addresses = [
+        ...ipv4Answers
+          .filter((answer) => answer.type.toUpperCase() === 'A')
+          .map((answer) => answer.data),
+        ...ipv6Answers
+          .filter((answer) => answer.type.toUpperCase() === 'AAAA')
+          .map((answer) => answer.data),
+      ];
+      candidates = [...new Set(addresses)].slice(0, dialConcurrency).map((hostname) => ({
+        hostname,
+        port,
+        resolvedFrom: host,
+      }));
     }
-    if (data && data.byteLength > 0) {
-      await writeInitialData(socket, data);
+    if (candidates.length === 0) {
+      candidates = Array.from({ length: dialConcurrency }, (_, index) => ({
+        hostname: host,
+        port,
+        index,
+      }));
     }
-    return socket;
+    return connectCandidates(candidates, data);
   }
 
   async function connectViaProxy(
@@ -54,22 +135,34 @@ export function createConnectTCP(ctx: RequestContext): ConnectTCPFn {
     data: Uint8Array | null,
   ): Promise<Socket> {
     const proxy = ctx.proxy;
-    if (!proxy.address) {
-      return connectDirect(host, port, data);
+    if (proxy.type === 'proxyip') {
+      const candidates = await resolveCandidates(proxy.proxyIp, host, ctx.userId, dnsResolver);
+      try {
+        return await connectCandidates(candidates, data);
+      } catch (error) {
+        if (!proxy.fallback) throw error;
+        return connectDirect(host, port, data);
+      }
     }
-
-    const proxyAddr = proxy.address;
+    if (!proxy.address) return connectDirect(host, port, data);
 
     switch (proxy.type) {
       case 'socks5':
-        return socks5Connect(host, port, data, proxyAddr, connector);
+        return connectSocks5(host, port, data, proxy.address, connector);
       case 'http':
-        return httpConnect(host, port, data, proxyAddr, connector, false);
+        return connectHttp(host, port, data, proxy.address, connector, false);
       case 'https':
-        return httpsConnect(host, port, data, proxyAddr, connector);
-      case 'proxyip':
-      default:
-        return connectDirect(host, port, data);
+        return connectHttps(host, port, data, proxy.address, connector);
+      case 'turn': {
+        const socket = await connectTurn(proxy.address, host, port, connector);
+        if (data?.byteLength) await writeInitialData(socket, data);
+        return socket;
+      }
+      case 'sstp': {
+        const socket = await connectSstp(proxy.address, host, port, connector);
+        if (data?.byteLength) await writeInitialData(socket, data);
+        return socket;
+      }
     }
   }
 
@@ -79,56 +172,60 @@ export function createConnectTCP(ctx: RequestContext): ConnectTCPFn {
       return;
     }
 
-    const shouldSendData = !sentViaProxy && data && data.byteLength > 0;
-    const packetData = shouldSendData ? data : null;
+    const attachSocket = (socket: Socket, retry: (() => Promise<void>) | undefined): void => {
+      wrapper.socket = socket;
+      void socket.closed
+        .finally(() => {
+          if (wrapper.socket === socket) closeSocketQuietly(bridge);
+        })
+        .catch(() => undefined);
+      void pumpStreams(socket, bridge, null, retry).catch((error) => {
+        console.error(
+          JSON.stringify({
+            event: 'tcp_stream_pump_failed',
+            host,
+            port,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        closeSocketQuietly(bridge);
+      });
+    };
+
+    const connectProxy = async (): Promise<void> => {
+      const socket = await connectViaProxy(host, port, data);
+      attachSocket(socket, undefined);
+    };
+    wrapper.retryConnect = connectProxy;
 
     const task = (async () => {
-      let socket: Socket;
       const proxy = ctx.proxy;
-      if (proxy.type !== 'proxyip' && proxy.address) {
-        socket = await connectViaProxy(host, port, packetData);
-      } else {
-        socket = await connectDirect(host, port, packetData);
+      const proxyImmediately =
+        proxy.type !== 'proxyip' &&
+        Boolean(proxy.address) &&
+        (proxy.global || matchesWhitelist(host, proxy.whitelist));
+      if (proxyImmediately) {
+        await connectProxy();
+        return;
       }
 
-      if (shouldSendData) sentViaProxy = true;
-      wrapper.socket = socket;
-      void socket.closed.finally(() => closeSocketQuietly(bridge)).catch(() => {});
-      void connectStreams(socket, bridge, null, undefined);
+      try {
+        const directSocket = await connectDirect(host, port, data);
+        attachSocket(directSocket, async () => {
+          if (wrapper.socket !== directSocket) return;
+          wrapper.socket = null;
+          await connectProxy();
+        });
+      } catch {
+        await connectProxy();
+      }
     })();
 
     wrapper.connectingPromise = task;
     try {
       await task;
     } finally {
-      if (wrapper.connectingPromise === task) {
-        wrapper.connectingPromise = null;
-      }
+      if (wrapper.connectingPromise === task) wrapper.connectingPromise = null;
     }
-
-    wrapper.retryConnect = async () => {
-      sentViaProxy = false;
-      const retryTask = (async () => {
-        let socket: Socket;
-        const proxy = ctx.proxy;
-        if (proxy.type !== 'proxyip' && proxy.address) {
-          socket = await connectViaProxy(host, port, data);
-        } else {
-          socket = await connectDirect(host, port, data);
-        }
-        if (data && data.byteLength > 0) sentViaProxy = true;
-        wrapper.socket = socket;
-        void socket.closed.finally(() => closeSocketQuietly(bridge)).catch(() => {});
-        void connectStreams(socket, bridge, null, undefined);
-      })();
-      wrapper.connectingPromise = retryTask;
-      try {
-        await retryTask;
-      } finally {
-        if (wrapper.connectingPromise === retryTask) {
-          wrapper.connectingPromise = null;
-        }
-      }
-    };
   };
 }

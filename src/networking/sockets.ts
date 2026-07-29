@@ -39,6 +39,14 @@ export async function openSocket(
     ]);
     return socket;
   } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: 'socket_open_error',
+        hostname: candidate.hostname,
+        port: candidate.port,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
     await closeSocket(socket);
     throw error;
   } finally {

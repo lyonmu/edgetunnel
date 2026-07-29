@@ -5,6 +5,11 @@ import { fetchTextLimited } from '../shared/fetch-limited';
 import { applyClashPatch } from './clash';
 import { applySingboxPatch } from './singbox';
 import { applySurgePatch } from './surge';
+import { loadStoredConfig } from '../config/repository';
+import { buildRuntimeConfig } from '../config/runtime';
+import { md5Twice } from '../shared/hash';
+
+export const SUBSCRIPTION_CONVERTER_TIMEOUT_MS = 30_000;
 
 export async function handleSubscriptionRequest(context: RequestContext): Promise<Response | null> {
   if (context.url.pathname !== '/sub') {
@@ -12,6 +17,10 @@ export async function handleSubscriptionRequest(context: RequestContext): Promis
   }
 
   const { url, request } = context;
+  const expectedToken = await md5Twice(`${context.host}${context.userId}`);
+  if (url.searchParams.get('token') !== expectedToken) {
+    return null;
+  }
   const ua = request.headers.get('User-Agent') || '';
 
   const subscriptionType = detectSubscriptionType(url, ua);
@@ -32,7 +41,7 @@ export async function handleSubscriptionRequest(context: RequestContext): Promis
       content = await generateMixedSubscription(context);
     } else {
       const mixedContent = await generateMixedSubscription(context);
-      const converterUrl = buildConverterUrl(url, subscriptionType, mixedContent, context);
+      const converterUrl = await buildConverterUrl(url, subscriptionType, mixedContent, context);
 
       const response = await fetchTextLimited(
         converterUrl,
@@ -42,7 +51,7 @@ export async function handleSubscriptionRequest(context: RequestContext): Promis
           },
         },
         {
-          timeoutMs: 10000,
+          timeoutMs: SUBSCRIPTION_CONVERTER_TIMEOUT_MS,
           maxBytes: 1024 * 1024,
         },
       );
@@ -66,7 +75,10 @@ export async function handleSubscriptionRequest(context: RequestContext): Promis
       }
     }
 
-    if (subscriptionType === 'base64') {
+    if (
+      subscriptionType === 'base64' ||
+      (subscriptionType === 'mixed' && !ua.toLowerCase().includes('mozilla'))
+    ) {
       content = btoa(content);
     }
 
@@ -124,15 +136,18 @@ function detectSubscriptionType(url: URL, ua: string): SubscriptionType {
   return 'mixed';
 }
 
-function buildConverterUrl(
+async function buildConverterUrl(
   originalUrl: URL,
   targetType: SubscriptionType,
   mixedContent: string,
   context: RequestContext,
-): string {
+): Promise<string> {
   const { env } = context;
-  const subApi = env.SUBAPI || 'https://subapi.example.com';
-  const subConfig = env.SUBCONFIG || '';
+  const stored = await loadStoredConfig(env.KV, context.host, context.userId);
+  const runtime = buildRuntimeConfig(stored, context);
+  const subApi = env.SUBAPI || runtime.订阅转换配置.SUBAPI;
+  const subConfig = env.SUBCONFIG || runtime.订阅转换配置.SUBCONFIG;
+  void originalUrl;
 
   return `${subApi}/sub?target=${targetType}&url=${encodeURIComponent(mixedContent)}&config=${encodeURIComponent(subConfig)}`;
 }

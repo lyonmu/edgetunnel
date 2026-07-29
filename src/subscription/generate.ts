@@ -1,8 +1,9 @@
 import type { RequestContext } from '../app/types';
+import { loadStoredConfig } from '../config/repository';
+import { buildRuntimeConfig } from '../config/runtime';
 import { getTransportConfig } from './transport';
 
 export async function generateMixedSubscription(context: RequestContext): Promise<string> {
-  const { url } = context;
   const config = await loadSubscriptionConfig(context);
 
   const nodes: string[] = [];
@@ -16,17 +17,7 @@ export async function generateMixedSubscription(context: RequestContext): Promis
     }
   }
 
-  let content = nodes.join('\n');
-
-  if (
-    !context.userAgent.includes('mozilla') ||
-    url.searchParams.has('b64') ||
-    url.searchParams.has('base64')
-  ) {
-    content = btoa(content);
-  }
-
-  return content;
+  return nodes.join('\n');
 }
 
 interface SubscriptionConfig {
@@ -47,23 +38,24 @@ interface SubscriptionConfig {
 }
 
 async function loadSubscriptionConfig(context: RequestContext): Promise<SubscriptionConfig> {
-  const { env, url } = context;
+  const stored = await loadStoredConfig(context.env.KV, context.host, context.userId);
+  const runtime = buildRuntimeConfig(stored, context);
 
   return {
-    uuid: env.UUID || '00000000-0000-4000-8000-000000000000',
-    host: url.host,
-    hosts: [url.hostname],
-    protocol: 'vless',
-    transport: 'ws',
-    path: '/',
-    fingerprint: 'chrome',
-    sni: url.hostname,
-    ech: false,
-    echConfig: { DNS: 'https://dns.alidns.com/dns-query', SNI: 'cloudflare-ech.com' },
-    ss: { 加密方式: 'aes-128-gcm', TLS: true },
-    randomPath: false,
-    enable0RTT: false,
-    tlsFragment: null,
+    uuid: runtime.UUID,
+    host: runtime.HOST,
+    hosts: runtime.HOSTS,
+    protocol: runtime.协议类型,
+    transport: runtime.传输协议,
+    path: runtime.完整节点路径,
+    fingerprint: runtime.Fingerprint,
+    sni: runtime.HOST,
+    ech: runtime.ECH,
+    echConfig: runtime.ECHConfig,
+    ss: runtime.SS,
+    randomPath: runtime.随机路径,
+    enable0RTT: runtime.启用0RTT,
+    tlsFragment: runtime.TLS分片,
   };
 }
 

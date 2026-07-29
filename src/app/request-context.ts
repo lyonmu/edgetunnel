@@ -2,7 +2,7 @@ import type { RequestContext } from './types';
 import { parseProxyRuntime } from '../networking/proxy-runtime';
 import { md5Twice } from '../shared/hash';
 
-const DEFAULT_KEY = '勿动此默认密钥，有需求请自行通过添加变量KEY进行修改';
+export const DEFAULT_ENCRYPTION_KEY = '勿动此默认密钥，有需求请自行通过添加变量KEY进行修改';
 const DEFAULT_WHITELIST = [
   '*tapecontent.net',
   '*cloudatacdn.com',
@@ -108,7 +108,7 @@ export async function createRequestContext(
     env.UUID ??
     env.uuid ??
     '';
-  const encryptionKey = env.KEY ?? DEFAULT_KEY;
+  const encryptionKey = env.KEY ?? DEFAULT_ENCRYPTION_KEY;
   const userId = await deriveUserId(env, adminPassword, encryptionKey);
   const hosts = env.HOST ? splitList(env.HOST).map(normalizeHost) : [url.hostname];
   const host = hosts[0] ?? url.hostname;

@@ -1,4 +1,4 @@
-import { toOwnedUint8Array } from '../shared/bytes';
+import { concatBytes, toOwnedUint8Array } from '../shared/bytes';
 
 export interface SSAEADCipher {
   method: string;
@@ -27,6 +27,7 @@ export const SS_SUPPORTED_CIPHERS: Record<string, SSAEADCipher> = {
 
 export const SS_AEAD_TAG_LENGTH = 16;
 export const SS_NONCE_LENGTH = 12;
+const SS_SUBKEY_INFO = new TextEncoder().encode('ss-subkey');
 
 export function ssDeriveKey(password: string, keyLen: number): Uint8Array {
   const key = new Uint8Array(keyLen);
@@ -187,4 +188,215 @@ export function incrementNonce(nonce: Uint8Array): void {
     nonce[i] = (nonce[i]! + 1) & 0xff;
     if (nonce[i]! !== 0) break;
   }
+}
+
+function getCipher(method: string): SSAEADCipher {
+  const cipher = SS_SUPPORTED_CIPHERS[method.toLowerCase()];
+  if (!cipher) throw new Error(`Unsupported Shadowsocks cipher: ${method}`);
+  return cipher;
+}
+
+async function deriveSessionKey(
+  cipher: SSAEADCipher,
+  masterKey: Uint8Array,
+  salt: Uint8Array,
+  usages: KeyUsage[],
+): Promise<CryptoKey> {
+  const hmac = { name: 'HMAC', hash: 'SHA-1' };
+  const saltKey = await crypto.subtle.importKey('raw', toOwnedUint8Array(salt), hmac, false, [
+    'sign',
+  ]);
+  const prk = new Uint8Array(
+    await crypto.subtle.sign('HMAC', saltKey, toOwnedUint8Array(masterKey)),
+  );
+  const prkKey = await crypto.subtle.importKey('raw', prk, hmac, false, ['sign']);
+  const subkey = new Uint8Array(cipher.keyLen);
+  let previous = new Uint8Array(0);
+  let written = 0;
+  let counter = 1;
+  while (written < subkey.byteLength) {
+    const input = concatBytes(previous, SS_SUBKEY_INFO, new Uint8Array([counter]));
+    previous = new Uint8Array(await crypto.subtle.sign('HMAC', prkKey, toOwnedUint8Array(input)));
+    const copyLength = Math.min(previous.byteLength, subkey.byteLength - written);
+    subkey.set(previous.subarray(0, copyLength), written);
+    written += copyLength;
+    counter += 1;
+  }
+  return crypto.subtle.importKey(
+    'raw',
+    subkey,
+    { name: 'AES-GCM', length: cipher.aesLength },
+    false,
+    usages,
+  );
+}
+
+async function encryptAndIncrement(
+  key: CryptoKey,
+  nonce: Uint8Array,
+  plaintext: Uint8Array,
+): Promise<Uint8Array> {
+  const result = await ssAEADEncrypt(key, nonce, plaintext);
+  incrementNonce(nonce);
+  return result;
+}
+
+async function decryptAndIncrement(
+  key: CryptoKey,
+  nonce: Uint8Array,
+  ciphertext: Uint8Array,
+): Promise<Uint8Array> {
+  const result = await ssAEADDecrypt(key, nonce, ciphertext);
+  incrementNonce(nonce);
+  return result;
+}
+
+export async function createShadowsocksEncryptor(password: string, method: string) {
+  const cipher = getCipher(method);
+  const masterKey = ssDeriveKey(password, cipher.keyLen);
+  const salt = crypto.getRandomValues(new Uint8Array(cipher.saltLen));
+  const key = await deriveSessionKey(cipher, masterKey, salt, ['encrypt']);
+  const nonce = new Uint8Array(SS_NONCE_LENGTH);
+  let saltPending = true;
+
+  return {
+    async encrypt(plaintext: Uint8Array): Promise<Uint8Array> {
+      const frames: Uint8Array[] = [];
+      if (saltPending) {
+        frames.push(salt);
+        saltPending = false;
+      }
+      for (let offset = 0; offset < plaintext.byteLength; offset += cipher.maxChunk) {
+        const payload = plaintext.subarray(
+          offset,
+          Math.min(offset + cipher.maxChunk, plaintext.byteLength),
+        );
+        const length = new Uint8Array([payload.byteLength >>> 8, payload.byteLength & 0xff]);
+        frames.push(
+          await encryptAndIncrement(key, nonce, length),
+          await encryptAndIncrement(key, nonce, payload),
+        );
+      }
+      return concatBytes(...frames);
+    },
+  };
+}
+
+export function createShadowsocksDecryptor(password: string, method: string) {
+  const cipher = getCipher(method);
+  const masterKey = ssDeriveKey(password, cipher.keyLen);
+  let buffer = new Uint8Array(0);
+  let key: CryptoKey | null = null;
+  let keyTask: Promise<CryptoKey> | null = null;
+  let payloadLength: number | null = null;
+  const nonce = new Uint8Array(SS_NONCE_LENGTH);
+
+  return {
+    async push(chunk: Uint8Array): Promise<Uint8Array[]> {
+      buffer = new Uint8Array(concatBytes(buffer, chunk));
+      if (!key) {
+        if (buffer.byteLength < cipher.saltLen) return [];
+        const salt = buffer.subarray(0, cipher.saltLen);
+        buffer = buffer.subarray(cipher.saltLen);
+        keyTask ??= deriveSessionKey(cipher, masterKey, salt, ['decrypt']);
+        key = await keyTask;
+      }
+
+      const plaintext: Uint8Array[] = [];
+      while (true) {
+        if (payloadLength === null) {
+          const encryptedLength = 2 + SS_AEAD_TAG_LENGTH;
+          if (buffer.byteLength < encryptedLength) break;
+          const length = await decryptAndIncrement(key, nonce, buffer.subarray(0, encryptedLength));
+          buffer = buffer.subarray(encryptedLength);
+          payloadLength = (length[0]! << 8) | length[1]!;
+          if (payloadLength > cipher.maxChunk) {
+            throw new Error(`Invalid Shadowsocks payload length: ${payloadLength}`);
+          }
+        }
+
+        const encryptedPayloadLength = payloadLength + SS_AEAD_TAG_LENGTH;
+        if (buffer.byteLength < encryptedPayloadLength) break;
+        plaintext.push(
+          await decryptAndIncrement(key, nonce, buffer.subarray(0, encryptedPayloadLength)),
+        );
+        buffer = buffer.subarray(encryptedPayloadLength);
+        payloadLength = null;
+      }
+      return plaintext;
+    },
+  };
+}
+
+export interface ShadowsocksTarget {
+  hostname: string;
+  port: number;
+  payload: Uint8Array;
+}
+
+export function parseShadowsocksAddress(data: Uint8Array): ShadowsocksTarget {
+  if (data.byteLength < 3) throw new Error('Invalid Shadowsocks address');
+  const addressType = data[0];
+  let offset = 1;
+  let hostname: string;
+
+  if (addressType === 1) {
+    if (data.byteLength < offset + 6) throw new Error('Invalid Shadowsocks IPv4 address');
+    hostname = `${data[offset]}.${data[offset + 1]}.${data[offset + 2]}.${data[offset + 3]}`;
+    offset += 4;
+  } else if (addressType === 3) {
+    const length = data[offset]!;
+    offset += 1;
+    if (data.byteLength < offset + length + 2) {
+      throw new Error('Invalid Shadowsocks domain address');
+    }
+    hostname = new TextDecoder().decode(data.subarray(offset, offset + length));
+    offset += length;
+  } else if (addressType === 4) {
+    if (data.byteLength < offset + 18) throw new Error('Invalid Shadowsocks IPv6 address');
+    const groups: string[] = [];
+    const view = new DataView(data.buffer, data.byteOffset + offset, 16);
+    for (let index = 0; index < 8; index += 1) {
+      groups.push(view.getUint16(index * 2).toString(16));
+    }
+    hostname = groups.join(':');
+    offset += 16;
+  } else {
+    throw new Error(`Invalid Shadowsocks address type: ${addressType}`);
+  }
+
+  const port = (data[offset]! << 8) | data[offset + 1]!;
+  return { hostname, port, payload: data.subarray(offset + 2) };
+}
+
+export type ShadowsocksAddressReadResult =
+  | { status: 'need_more' }
+  | { status: 'invalid' }
+  | { status: 'ok'; target: ShadowsocksTarget };
+
+export function createShadowsocksAddressReader(maxBytes = 64 * 1024) {
+  let pending = new Uint8Array(0);
+
+  return {
+    push(chunk: Uint8Array): ShadowsocksAddressReadResult {
+      pending = new Uint8Array(concatBytes(pending, chunk));
+      if (pending.byteLength > maxBytes) return { status: 'invalid' };
+      if (pending.byteLength < 1) return { status: 'need_more' };
+
+      const addressType = pending[0];
+      let requiredBytes: number;
+      if (addressType === 1) {
+        requiredBytes = 7;
+      } else if (addressType === 4) {
+        requiredBytes = 19;
+      } else if (addressType === 3) {
+        if (pending.byteLength < 2) return { status: 'need_more' };
+        requiredBytes = 4 + (pending[1] ?? 0);
+      } else {
+        return { status: 'invalid' };
+      }
+      if (pending.byteLength < requiredBytes) return { status: 'need_more' };
+      return { status: 'ok', target: parseShadowsocksAddress(pending) };
+    },
+  };
 }

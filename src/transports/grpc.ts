@@ -1,12 +1,14 @@
 import { createUploadQueue } from '../networking/upload-queue';
 import { buildGrpcFrame, parseGrpcFrames, parseGrpcPayload } from './common';
 import {
+  createFirstPacketReader,
   createRemoteConnWrapper,
-  parseFirstPacket,
+  createRemoteWriterProvider,
   type TransportBridge,
   type RemoteConnWrapper,
 } from './bridge';
 import type { RequestContext } from '../app/types';
+import { createDnsUdpSession } from '../networking/udp-dns';
 
 export function handleGRPC(
   request: Request,
@@ -18,11 +20,13 @@ export function handleGRPC(
     bridge: TransportBridge,
     wrapper: RemoteConnWrapper,
   ) => Promise<void>,
+  createDnsSession: typeof createDnsUdpSession = createDnsUdpSession,
 ): Response {
   if (!request.body) return new Response('Bad Request', { status: 400 });
 
   const reader = request.body.getReader();
   const wrapper = createRemoteConnWrapper();
+  const writerProvider = createRemoteWriterProvider(wrapper);
   const grpcHeaders = new Headers({
     'Content-Type': 'application/grpc',
     'grpc-status': '0',
@@ -38,15 +42,9 @@ export function handleGRPC(
         const grpcBridge = createGrpcBridge(controller);
         let uploadQueue: ReturnType<typeof createUploadQueue> | null = null;
 
-        const getRemoteWriter = () => {
-          const socket = wrapper.socket;
-          if (!socket) return null;
-          return socket.writable.getWriter();
-        };
-
         uploadQueue = uploadQueueRef = createUploadQueue({
-          getWriter: getRemoteWriter,
-          releaseWriter: () => {},
+          getWriter: writerProvider.getWriter,
+          releaseWriter: writerProvider.releaseWriter,
           retryConnect: async () => {
             if (typeof wrapper.retryConnect !== 'function') throw new Error('retry unavailable');
             await wrapper.retryConnect();
@@ -57,6 +55,7 @@ export function handleGRPC(
             } catch {
               /* ignore */
             }
+            writerProvider.releaseWriter();
             grpcBridge.close();
           },
           name: 'gRPC上行',
@@ -69,6 +68,8 @@ export function handleGRPC(
         try {
           let pending = new Uint8Array(0);
           let isFirstFrame = true;
+          const firstPacketReader = createFirstPacketReader(ctx.userId);
+          let dnsSession: ReturnType<typeof createDnsUdpSession> | null = null;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -89,23 +90,39 @@ export function handleGRPC(
               const payload = parseGrpcPayload(grpcPayload);
               if (!payload.byteLength) continue;
 
+              if (dnsSession) {
+                await dnsSession.push(payload);
+                continue;
+              }
+
               if (isFirstFrame) {
+                const result = firstPacketReader.push(payload);
+                if (result.status === 'need_more') continue;
+                if (result.status === 'invalid') throw new Error('Invalid first packet');
                 isFirstFrame = false;
-                const firstPacket = parseFirstPacket(payload, ctx.userId);
-                if (!firstPacket) throw new Error('Invalid first packet');
+                const firstPacket = result.packet;
 
                 if (
                   firstPacket.isUDP &&
-                  firstPacket.protocol !== 'trojan' &&
+                  firstPacket.protocol === 'vless' &&
                   firstPacket.port !== 53
                 ) {
                   throw new Error('UDP is not supported');
                 }
 
-                if (firstPacket.respHeader) {
-                  grpcBridge.send(firstPacket.respHeader);
+                if (firstPacket.isUDP) {
+                  dnsSession = createDnsSession(
+                    firstPacket.protocol,
+                    grpcBridge,
+                    firstPacket.respHeader,
+                  );
+                  if (firstPacket.rawData.byteLength) {
+                    await dnsSession.push(firstPacket.rawData);
+                  }
+                  continue;
                 }
 
+                if (firstPacket.respHeader) grpcBridge.send(firstPacket.respHeader);
                 await connectTCP(
                   firstPacket.hostname,
                   firstPacket.port,
@@ -122,10 +139,16 @@ export function handleGRPC(
           }
 
           await uploadQueue.waitIdle();
-        } catch {
-          // error during gRPC processing
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              event: 'grpc_transport_error',
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          );
         } finally {
           uploadQueue?.clear();
+          writerProvider.releaseWriter();
           try {
             reader.releaseLock();
           } catch {
@@ -141,6 +164,7 @@ export function handleGRPC(
       },
       cancel() {
         uploadQueueRef?.clear();
+        writerProvider.releaseWriter();
         try {
           void wrapper.socket?.close();
         } catch {
@@ -161,12 +185,17 @@ interface GrpcBridge extends TransportBridge {
   flushPending(): void;
 }
 
-function createGrpcBridge(controller: ReadableStreamDefaultController): GrpcBridge {
+export function createGrpcBridge(controller: ReadableStreamDefaultController): GrpcBridge {
   let closed = false;
   const sendQueue: Uint8Array[] = [];
   let queuedBytes = 0;
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   const flush = () => {
+    if (flushTimer !== null) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
     if (!queuedBytes) return;
     const out = new Uint8Array(queuedBytes);
     let offset = 0;
@@ -193,7 +222,11 @@ function createGrpcBridge(controller: ReadableStreamDefaultController): GrpcBrid
       const frame = buildGrpcFrame(chunk);
       sendQueue.push(frame);
       queuedBytes += frame.byteLength;
-      if (queuedBytes >= 32 * 1024) flush();
+      if (queuedBytes >= 32 * 1024) {
+        flush();
+      } else if (flushTimer === null) {
+        flushTimer = setTimeout(flush, 1);
+      }
     },
     flushPending() {
       flush();

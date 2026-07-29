@@ -3,12 +3,20 @@ import { closeSocketQuietly } from '../networking/stream-pump';
 import { decodeEarlyData } from './common';
 import {
   createWebSocketBridge,
+  createFirstPacketReader,
   createRemoteConnWrapper,
-  parseFirstPacket,
+  createRemoteWriterProvider,
   type TransportBridge,
   type RemoteConnWrapper,
 } from './bridge';
 import type { RequestContext } from '../app/types';
+import {
+  createShadowsocksDecryptor,
+  createShadowsocksEncryptor,
+  createShadowsocksAddressReader,
+} from '../protocols/shadowsocks';
+import { toUint8Array } from '../shared/bytes';
+import { createDnsUdpSession } from '../networking/udp-dns';
 
 interface HalfOpenWebSocket extends WebSocket {
   accept(options?: { allowHalfOpen?: boolean }): void;
@@ -24,6 +32,7 @@ export function handleWebSocket(
     bridge: TransportBridge,
     wrapper: RemoteConnWrapper,
   ) => Promise<void>,
+  createDnsSession: typeof createDnsUdpSession = createDnsUdpSession,
 ): Response {
   const pair = new WebSocketPair();
   const [clientSock, serverSock] = Object.values(pair) as [WebSocket, WebSocket];
@@ -36,18 +45,14 @@ export function handleWebSocket(
   serverSock.binaryType = 'arraybuffer';
 
   const wrapper = createRemoteConnWrapper();
+  const writerProvider = createRemoteWriterProvider(wrapper);
   const earlyDataHeader = request.headers.get('sec-websocket-protocol') || '';
+  const shadowsocksMethod = ctx.url.searchParams.get('enc')?.toLowerCase() || null;
   let uploadQueue: ReturnType<typeof createUploadQueue> | null = null;
 
-  const getRemoteWriter = () => {
-    const socket = wrapper.socket;
-    if (!socket) return null;
-    return socket.writable.getWriter();
-  };
-
   uploadQueue = createUploadQueue({
-    getWriter: getRemoteWriter,
-    releaseWriter: () => {},
+    getWriter: writerProvider.getWriter,
+    releaseWriter: writerProvider.releaseWriter,
     retryConnect: async () => {
       if (typeof wrapper.retryConnect !== 'function') throw new Error('retry unavailable');
       await wrapper.retryConnect();
@@ -58,50 +63,106 @@ export function handleWebSocket(
       } catch {
         /* ignore */
       }
+      writerProvider.releaseWriter();
       closeSocketQuietly(serverSock);
     },
     name: 'WS上行',
   });
 
-  const bridge = createWebSocketBridge(serverSock);
+  const bridge = shadowsocksMethod
+    ? createShadowsocksBridge(serverSock, ctx.userId, shadowsocksMethod)
+    : createWebSocketBridge(serverSock);
+  const firstPacketReader = createFirstPacketReader(ctx.userId);
+  const shadowsocksDecryptor = shadowsocksMethod
+    ? createShadowsocksDecryptor(ctx.userId, shadowsocksMethod)
+    : null;
+  const shadowsocksAddressReader = shadowsocksMethod ? createShadowsocksAddressReader() : null;
+  let shadowsocksConnected = false;
+  let firstPacketHandled = false;
+  let dnsSession: ReturnType<typeof createDnsUdpSession> | null = null;
+  let processing = Promise.resolve();
 
-  serverSock.addEventListener('message', async (event) => {
-    try {
-      const data =
-        event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : new Uint8Array(event.data);
-      if (!data.byteLength) return;
+  const processData = async (data: Uint8Array) => {
+    if (shadowsocksDecryptor) {
+      const plaintextChunks = await shadowsocksDecryptor.push(data);
+      for (const plaintext of plaintextChunks) {
+        if (!shadowsocksConnected) {
+          const result = shadowsocksAddressReader!.push(plaintext);
+          if (result.status === 'need_more') continue;
+          if (result.status === 'invalid') throw new Error('Invalid Shadowsocks address');
+          const target = result.target;
+          await connectTCP(target.hostname, target.port, target.payload, bridge, wrapper);
+          shadowsocksConnected = true;
+        } else if (!uploadQueue!.enqueue(plaintext)) {
+          throw new Error('Remote socket is not ready');
+        }
+      }
+      return;
+    }
 
-      if (!wrapper.socket) {
-        const earlyBytes = decodeEarlyData(earlyDataHeader, ctx.userId);
-        const firstPacketData = earlyBytes ? concatBytes(earlyBytes, data) : data;
-        const firstPacket = parseFirstPacket(firstPacketData, ctx.userId);
-        if (!firstPacket) {
-          closeSocketQuietly(serverSock);
-          return;
+    if (dnsSession) {
+      await dnsSession.push(data);
+      return;
+    }
+
+    if (!firstPacketHandled) {
+      const result = firstPacketReader.push(data);
+      if (result.status === 'need_more') return;
+      if (result.status === 'invalid') throw new Error('Invalid first packet');
+      const firstPacket = result.packet;
+      firstPacketHandled = true;
+      if (firstPacket.isUDP) {
+        if (firstPacket.protocol === 'vless' && firstPacket.port !== 53) {
+          throw new Error('UDP is not supported');
         }
-        await connectTCP(
-          firstPacket.hostname,
-          firstPacket.port,
-          firstPacket.rawData,
-          bridge,
-          wrapper,
-        );
-        if (firstPacket.respHeader) {
-          bridge.send(firstPacket.respHeader);
-        }
+        dnsSession = createDnsSession(firstPacket.protocol, bridge, firstPacket.respHeader);
+        if (firstPacket.rawData.byteLength) await dnsSession.push(firstPacket.rawData);
         return;
       }
+      if (firstPacket.respHeader) bridge.send(firstPacket.respHeader);
+      await connectTCP(
+        firstPacket.hostname,
+        firstPacket.port,
+        firstPacket.rawData,
+        bridge,
+        wrapper,
+      );
+      return;
+    }
 
-      if (!uploadQueue.enqueue(data)) {
-        throw new Error('Remote socket is not ready');
-      }
-    } catch {
-      closeSocketQuietly(serverSock);
+    if (!uploadQueue!.enqueue(data)) {
+      throw new Error('Remote socket is not ready');
+    }
+  };
+
+  const handleTransportError = (error: unknown) => {
+    console.error(
+      JSON.stringify({
+        event: 'websocket_transport_error',
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    closeSocketQuietly(serverSock);
+  };
+
+  const earlyBytes = shadowsocksMethod ? null : decodeEarlyData(earlyDataHeader, ctx.userId);
+  if (earlyBytes?.byteLength) {
+    processing = processing.then(() => processData(earlyBytes)).catch(handleTransportError);
+  }
+
+  serverSock.addEventListener('message', (event) => {
+    try {
+      const data = toUint8Array(event.data as ArrayBuffer | ArrayBufferView);
+      if (!data.byteLength) return;
+      processing = processing.then(() => processData(data)).catch(handleTransportError);
+    } catch (error) {
+      handleTransportError(error);
     }
   });
 
   serverSock.addEventListener('close', () => {
     uploadQueue?.clear();
+    writerProvider.releaseWriter();
     try {
       void wrapper.socket?.close();
     } catch {
@@ -111,6 +172,7 @@ export function handleWebSocket(
 
   serverSock.addEventListener('error', () => {
     uploadQueue?.clear();
+    writerProvider.releaseWriter();
     try {
       void wrapper.socket?.close();
     } catch {
@@ -118,36 +180,45 @@ export function handleWebSocket(
     }
   });
 
-  const earlyBytes = decodeEarlyData(earlyDataHeader, ctx.userId);
-  if (earlyBytes && earlyBytes.byteLength > 0) {
-    const firstPacket = parseFirstPacket(earlyBytes, ctx.userId);
-    if (firstPacket) {
-      void (async () => {
-        try {
-          await connectTCP(
-            firstPacket.hostname,
-            firstPacket.port,
-            firstPacket.rawData,
-            bridge,
-            wrapper,
-          );
-          if (firstPacket.respHeader) bridge.send(firstPacket.respHeader);
-        } catch {
-          closeSocketQuietly(serverSock);
-        }
-      })();
-    }
-  }
-
   return new Response(null, {
     status: 101,
     webSocket: clientSock,
   });
 }
 
-function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const result = new Uint8Array(a.length + b.length);
-  result.set(a, 0);
-  result.set(b, a.length);
-  return result;
+function createShadowsocksBridge(
+  webSocket: WebSocket,
+  password: string,
+  method: string,
+): TransportBridge {
+  const encryptor = createShadowsocksEncryptor(password, method);
+  let sendChain = Promise.resolve();
+
+  return {
+    get readyState() {
+      return webSocket.readyState;
+    },
+    send(data) {
+      const plaintext = toUint8Array(data);
+      sendChain = sendChain
+        .then(async () => {
+          const encrypted = await (await encryptor).encrypt(plaintext);
+          if (encrypted.byteLength && webSocket.readyState === WebSocket.OPEN) {
+            webSocket.send(encrypted);
+          }
+        })
+        .catch((error: unknown) => {
+          console.error(
+            JSON.stringify({
+              event: 'shadowsocks_encrypt_error',
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          );
+          closeSocketQuietly(webSocket);
+        });
+    },
+    close() {
+      closeSocketQuietly(webSocket);
+    },
+  };
 }

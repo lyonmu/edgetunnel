@@ -210,7 +210,13 @@ export async function connectStreams(
       }
     }
     await downlinkSender.flush();
-  } catch {
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: 'downlink_stream_error',
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
     closeSocketQuietly(webSocket);
   } finally {
     try {

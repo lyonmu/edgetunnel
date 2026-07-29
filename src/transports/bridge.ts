@@ -1,3 +1,4 @@
+import { concatBytes } from '../shared/bytes';
 import { closeSocketQuietly } from '../networking/stream-pump';
 import { parseVlessRequest } from '../protocols/vless';
 import { parseTrojanRequest } from '../protocols/trojan';
@@ -64,7 +65,11 @@ export interface ParsedFirstPacket {
   respHeader: Uint8Array | null;
 }
 
-export function parseFirstPacket(data: Uint8Array, token: string): ParsedFirstPacket | null {
+function parseFirstPacketInternal(
+  data: Uint8Array,
+  token: string,
+  logRejection: boolean,
+): ParsedFirstPacket | null {
   const vlessResult = parseVlessRequest(data, token);
   if (vlessResult.ok) {
     return {
@@ -89,10 +94,55 @@ export function parseFirstPacket(data: Uint8Array, token: string): ParsedFirstPa
     };
   }
 
+  if (logRejection) {
+    console.error(
+      JSON.stringify({
+        event: 'first_packet_rejected',
+        byteLength: data.byteLength,
+        vlessError: vlessResult.error,
+        trojanError: trojanResult.error,
+      }),
+    );
+  }
   return null;
 }
 
+export function parseFirstPacket(data: Uint8Array, token: string): ParsedFirstPacket | null {
+  return parseFirstPacketInternal(data, token, true);
+}
+
 export { isValidWSEarlyData } from './common';
+
+export type FirstPacketReadResult =
+  | { status: 'need_more' }
+  | { status: 'invalid' }
+  | { status: 'ok'; packet: ParsedFirstPacket };
+
+export function createFirstPacketReader(token: string, maxBytes = 64 * 1024) {
+  let pending = new Uint8Array(0);
+
+  return {
+    push(chunk: Uint8Array): FirstPacketReadResult {
+      pending = new Uint8Array(concatBytes(pending, chunk));
+      if (pending.byteLength > maxBytes) return { status: 'invalid' };
+
+      const packet = parseFirstPacketInternal(pending, token, false);
+      if (packet) return { status: 'ok', packet };
+
+      const vless = parseVlessRequest(pending, token);
+      const trojan = parseTrojanRequest(pending, token);
+      const vlessNeedsMore =
+        pending.byteLength < 18 ||
+        (!vless.ok && vless.error !== 'Invalid uuid' && /data|length/i.test(vless.error));
+      const trojanNeedsMore =
+        pending.byteLength < 58 || (!trojan.ok && trojan.error === 'invalid S5 request data');
+
+      if (vlessNeedsMore || trojanNeedsMore) return { status: 'need_more' };
+      parseFirstPacketInternal(pending, token, true);
+      return { status: 'invalid' };
+    },
+  };
+}
 
 export interface RemoteConnWrapper {
   socket: Socket | null;
@@ -102,4 +152,34 @@ export interface RemoteConnWrapper {
 
 export function createRemoteConnWrapper(): RemoteConnWrapper {
   return { socket: null, connectingPromise: null, retryConnect: null };
+}
+
+export function createRemoteWriterProvider(wrapper: RemoteConnWrapper) {
+  let currentSocket: Socket | null = null;
+  let writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
+
+  const releaseWriter = () => {
+    if (writer) {
+      try {
+        writer.releaseLock();
+      } catch {
+        /* ignore */
+      }
+    }
+    writer = null;
+    currentSocket = null;
+  };
+
+  const getWriter = () => {
+    const socket = wrapper.socket;
+    if (!socket) return null;
+    if (socket !== currentSocket) {
+      releaseWriter();
+      currentSocket = socket;
+      writer = socket.writable.getWriter();
+    }
+    return writer;
+  };
+
+  return { getWriter, releaseWriter };
 }
