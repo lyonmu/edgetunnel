@@ -134,5 +134,6 @@ function generateNodeLink(address: string, config: SubscriptionConfig): string |
     return `ss://${btoa(config.ss.加密方式 + ':' + config.uuid)}@${host}:${port}?plugin=${encodeURIComponent(plugin)}#${encodeURIComponent(remark)}`;
   }
 
-  return `${config.protocol}://${config.uuid}@${host}:${port}?security=tls&type=${transportConfig.type}&${transportConfig.hostField}=${config.host}&fp=${config.fingerprint}&sni=${config.sni}&${transportConfig.pathField}=${encodeURIComponent(config.path)}&encryption=none#${encodeURIComponent(remark)}`;
+  const packetEncoding = config.protocol === 'vless' ? '&packetEncoding=packetaddr' : '';
+  return `${config.protocol}://${config.uuid}@${host}:${port}?security=tls&type=${transportConfig.type}&${transportConfig.hostField}=${config.host}&fp=${config.fingerprint}&sni=${config.sni}&${transportConfig.pathField}=${encodeURIComponent(config.path)}&encryption=none${packetEncoding}#${encodeURIComponent(remark)}`;
 }

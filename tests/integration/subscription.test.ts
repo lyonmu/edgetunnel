@@ -48,9 +48,11 @@ describe('subscription routes', () => {
 
   it('returns raw mixed nodes for browser user agents', async () => {
     const response = await fetchWorker('/sub', 'Mozilla/5.0');
+    const link = new URL(await response.text());
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toMatch(/^vless:\/\//);
+    expect(link.protocol).toBe('vless:');
+    expect(link.searchParams.get('packetEncoding')).toBe('packetaddr');
   });
 
   it('generates Shadowsocks plugin links with cipher routing and mux disabled', async () => {

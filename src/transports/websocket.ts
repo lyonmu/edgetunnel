@@ -16,7 +16,11 @@ import {
   createShadowsocksAddressReader,
 } from '../protocols/shadowsocks';
 import { toUint8Array } from '../shared/bytes';
-import { createDnsUdpSession } from '../networking/udp-dns';
+import {
+  createDnsUdpSession,
+  isVlessPacketAddrTarget,
+  type DnsUdpProtocol,
+} from '../networking/udp-dns';
 
 interface HalfOpenWebSocket extends WebSocket {
   accept(options?: { allowHalfOpen?: boolean }): void;
@@ -112,10 +116,14 @@ export function handleWebSocket(
       const firstPacket = result.packet;
       firstPacketHandled = true;
       if (firstPacket.isUDP) {
+        let dnsProtocol: DnsUdpProtocol = firstPacket.protocol;
         if (firstPacket.protocol === 'vless' && firstPacket.port !== 53) {
-          throw new Error('UDP is not supported');
+          if (!isVlessPacketAddrTarget(firstPacket.hostname, firstPacket.port)) {
+            throw new Error('UDP is not supported');
+          }
+          dnsProtocol = 'vless-packetaddr';
         }
-        dnsSession = createDnsSession(firstPacket.protocol, bridge, firstPacket.respHeader);
+        dnsSession = createDnsSession(dnsProtocol, bridge, firstPacket.respHeader);
         if (firstPacket.rawData.byteLength) await dnsSession.push(firstPacket.rawData);
         return;
       }

@@ -7,7 +7,12 @@ const DNS_DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query';
 const DNS_TIMEOUT_MS = 10_000;
 
 export type DnsQuery = (payload: Uint8Array) => Promise<Uint8Array>;
+export type DnsUdpProtocol = 'vless' | 'vless-packetaddr' | 'trojan';
 type DnsFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+export function isVlessPacketAddrTarget(hostname: string, port: number): boolean {
+  return port === 443 && hostname.toLowerCase() === 'sp.packet-addr.v2fly.arpa';
+}
 
 async function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -113,7 +118,7 @@ function send(bridge: TransportBridge, payload: Uint8Array): void {
 }
 
 export function createDnsUdpSession(
-  protocol: 'vless' | 'trojan',
+  protocol: DnsUdpProtocol,
   bridge: TransportBridge,
   responseHeader: Uint8Array | null,
   query: DnsQuery = queryDnsDoh,
@@ -138,6 +143,39 @@ export function createDnsUdpSession(
       const payload = new Uint8Array(pending.slice(2, length + 2));
       pending = pending.slice(length + 2);
       sendResponse(await query(payload));
+    }
+  };
+
+  const processVlessPacketAddr = async () => {
+    while (pending.byteLength >= 2) {
+      const packetLength = ((pending[0] ?? 0) << 8) | (pending[1] ?? 0);
+      if (pending.byteLength < packetLength + 2) return;
+      const packet = new Uint8Array(pending.slice(2, packetLength + 2));
+      pending = pending.slice(packetLength + 2);
+
+      const addressType = packet[0];
+      let portOffset: number;
+      if (addressType === 1) {
+        portOffset = 5;
+      } else if (addressType === 4) {
+        portOffset = 17;
+      } else if (addressType === 3) {
+        if (packet.byteLength < 2) throw new Error('invalid VLESS PacketAddr domain');
+        portOffset = 2 + (packet[1] ?? 0);
+      } else {
+        throw new Error(`invalid VLESS PacketAddr addressType: ${addressType}`);
+      }
+      if (packet.byteLength < portOffset + 2) {
+        throw new Error('invalid VLESS PacketAddr address');
+      }
+      const port = ((packet[portOffset] ?? 0) << 8) | (packet[portOffset + 1] ?? 0);
+      if (port !== 53) throw new Error('UDP is not supported');
+
+      const addressAndPort = packet.slice(0, portOffset + 2);
+      const payload = packet.slice(portOffset + 2);
+      if (!payload.byteLength) continue;
+      const response = await query(payload);
+      sendResponse(new Uint8Array(concatBytes(addressAndPort, response)));
     }
   };
 
@@ -193,6 +231,7 @@ export function createDnsUdpSession(
     async push(chunk: Uint8Array): Promise<void> {
       if (chunk.byteLength) pending = new Uint8Array(concatBytes(pending, chunk));
       if (protocol === 'vless') await processVless();
+      else if (protocol === 'vless-packetaddr') await processVlessPacketAddr();
       else await processTrojan();
     },
   };

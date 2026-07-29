@@ -49,6 +49,20 @@ describe('DNS UDP session', () => {
     expect(sent).toEqual([new Uint8Array([0, 0, 0, 4, 1, 2, 3, 9]), new Uint8Array([0, 2, 4, 9])]);
   });
 
+  it('parses and re-encapsulates fragmented VLESS PacketAddr DNS frames', async () => {
+    const { bridge, sent } = collectingBridge();
+    const query = vi.fn(async () => new Uint8Array([7, 8]));
+    const session = createDnsUdpSession('vless-packetaddr', bridge, new Uint8Array([0, 0]), query);
+    const address = new Uint8Array([1, 1, 1, 1, 1, 0, 53]);
+    const packet = new Uint8Array([0, 9, ...address, 3, 4]);
+
+    await session.push(packet.slice(0, 5));
+    await session.push(packet.slice(5));
+
+    expect(query).toHaveBeenCalledWith(new Uint8Array([3, 4]));
+    expect(sent).toEqual([new Uint8Array([0, 0, 0, 9, ...address, 7, 8])]);
+  });
+
   it('parses and re-encapsulates fragmented Trojan UDP frames', async () => {
     const { bridge, sent } = collectingBridge();
     const query = vi.fn(async () => new Uint8Array([7, 8]));

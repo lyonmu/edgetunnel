@@ -8,7 +8,11 @@ import {
   type RemoteConnWrapper,
 } from './bridge';
 import type { RequestContext } from '../app/types';
-import { createDnsUdpSession } from '../networking/udp-dns';
+import {
+  createDnsUdpSession,
+  isVlessPacketAddrTarget,
+  type DnsUdpProtocol,
+} from '../networking/udp-dns';
 
 export function handleGRPC(
   request: Request,
@@ -102,20 +106,15 @@ export function handleGRPC(
                 isFirstFrame = false;
                 const firstPacket = result.packet;
 
-                if (
-                  firstPacket.isUDP &&
-                  firstPacket.protocol === 'vless' &&
-                  firstPacket.port !== 53
-                ) {
-                  throw new Error('UDP is not supported');
-                }
-
                 if (firstPacket.isUDP) {
-                  dnsSession = createDnsSession(
-                    firstPacket.protocol,
-                    grpcBridge,
-                    firstPacket.respHeader,
-                  );
+                  let dnsProtocol: DnsUdpProtocol = firstPacket.protocol;
+                  if (firstPacket.protocol === 'vless' && firstPacket.port !== 53) {
+                    if (!isVlessPacketAddrTarget(firstPacket.hostname, firstPacket.port)) {
+                      throw new Error('UDP is not supported');
+                    }
+                    dnsProtocol = 'vless-packetaddr';
+                  }
+                  dnsSession = createDnsSession(dnsProtocol, grpcBridge, firstPacket.respHeader);
                   if (firstPacket.rawData.byteLength) {
                     await dnsSession.push(firstPacket.rawData);
                   }

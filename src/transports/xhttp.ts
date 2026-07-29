@@ -9,7 +9,11 @@ import {
   type RemoteConnWrapper,
 } from './bridge';
 import type { RequestContext } from '../app/types';
-import { createDnsUdpSession } from '../networking/udp-dns';
+import {
+  createDnsUdpSession,
+  isVlessPacketAddrTarget,
+  type DnsUdpProtocol,
+} from '../networking/udp-dns';
 
 export function handleXHTTP(
   request: Request,
@@ -84,10 +88,14 @@ export function handleXHTTP(
 
           let dnsSession: ReturnType<typeof createDnsUdpSession> | null = null;
           if (firstPacket.isUDP) {
+            let dnsProtocol: DnsUdpProtocol = firstPacket.protocol;
             if (firstPacket.protocol === 'vless' && firstPacket.port !== 53) {
-              throw new Error('UDP is not supported');
+              if (!isVlessPacketAddrTarget(firstPacket.hostname, firstPacket.port)) {
+                throw new Error('UDP is not supported');
+              }
+              dnsProtocol = 'vless-packetaddr';
             }
-            dnsSession = createDnsSession(firstPacket.protocol, bridge, firstPacket.respHeader);
+            dnsSession = createDnsSession(dnsProtocol, bridge, firstPacket.respHeader);
             if (firstPacket.rawData.byteLength) await dnsSession.push(firstPacket.rawData);
           } else {
             if (firstPacket.respHeader) bridge.send(firstPacket.respHeader);
