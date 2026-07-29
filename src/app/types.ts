@@ -58,4 +58,22 @@ export interface RequestContext {
   proxy: ProxyRuntimeConfig;
 }
 
+export interface RuntimeEnv extends Env {
+  ADMIN?: string;
+  UUID?: string;
+  CONFIG_KEY?: string;
+  TROJAN_PASSWORD?: string;
+  SHADOWSOCKS_PASSWORD?: string;
+}
+
+export interface RequestMetadata {
+  request: Request;
+  env: RuntimeEnv;
+  execution: ExecutionContext;
+  url: URL;
+  clientIp: string;
+  userAgent: string;
+  requestId: string;
+}
+
 export {};

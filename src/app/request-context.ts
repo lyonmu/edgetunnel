@@ -1,4 +1,5 @@
 import type { RequestContext } from './types';
+import type { RequestMetadata, RuntimeEnv } from './types';
 import { parseProxyRuntime } from '../networking/proxy-runtime';
 import { md5Twice } from '../shared/hash';
 
@@ -12,6 +13,24 @@ const DEFAULT_WHITELIST = [
 ] as const;
 const UUID_V4 =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+
+export type { RequestMetadata, RuntimeEnv } from './types';
+
+export function createRequestMetadata(
+  request: Request,
+  env: RuntimeEnv,
+  execution: ExecutionContext,
+): RequestMetadata {
+  return {
+    request,
+    env,
+    execution,
+    url: new URL(request.url),
+    clientIp: request.headers.get('CF-Connecting-IP') ?? 'unknown',
+    userAgent: request.headers.get('User-Agent') ?? '',
+    requestId: crypto.randomUUID(),
+  };
+}
 
 function splitList(value: string): string[] {
   return value

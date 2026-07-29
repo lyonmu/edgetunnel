@@ -308,7 +308,6 @@ git commit -m "feat(auth): 使用 HMAC 保护管理会话"
 - Modify: `src/app/types.ts`
 - Modify: `src/app/request-context.ts`
 - Modify: `src/config/runtime.ts`
-- Modify: `src/index.ts`
 - Test: `tests/unit/request-context.test.ts`
 - Test: `tests/unit/runtime-config.test.ts`
 
@@ -319,17 +318,17 @@ git commit -m "feat(auth): 使用 HMAC 保护管理会话"
 - Produces: `createRequestContext(request, env, execution): Promise<RequestContext>`
 - Produces: `loadRuntimeSnapshot(context): Promise<RuntimeSnapshot>`
 
-- [ ] **Step 1: 写新 Env 和上下文测试**
+- [x] **Step 1: 写新 Env 和上下文测试**
 
 只接受 `ADMIN`、`UUID`、`CONFIG_KEY`、`TROJAN_PASSWORD`、`SHADOWSOCKS_PASSWORD`；
 缺失必需 Secret 时返回可分类配置错误；不再从 `admin/password/KEY/TOKEN` 派生身份；不再读取
 `PROXYIP/GO2SOCKS5/PATH/HOST`。
 
-- [ ] **Step 2: 写运行时快照测试**
+- [x] **Step 2: 写运行时快照测试**
 
 验证配置只读、连接握手后 KV 更新不改变旧快照、新请求读取新 revision、Secret 不出现在序列化配置。
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 Run:
 
@@ -337,24 +336,26 @@ Run:
 npx vitest run --config vitest.config.ts tests/unit/request-context.test.ts tests/unit/runtime-config.test.ts
 ```
 
-- [ ] **Step 4: 精简上下文并接入 Repository**
+- [x] **Step 4: 新增精简上下文并接入 Repository**
 
 请求上下文只保留 request/env/execution/url/clientIp/userAgent/requestId；身份和配置通过
-`loadRuntimeSnapshot` 注入。删除默认密钥和 MD5 UUID 派生。
+`loadRuntimeSnapshot` 注入。为保持中间提交的数据面可运行，旧 `RequestContext` 暂时并行保留；Task
+6–10 逐个切换消费者，Task 13 删除默认密钥、MD5 UUID 派生和旧 Env alias。
 
-- [ ] **Step 5: 重新生成 Env 类型**
+- [x] **Step 5: 保持 Wrangler 生成绑定类型**
 
 Run: `npm run types`
 
-Expected: `worker-configuration.d.ts` 与 `wrangler.jsonc` bindings 一致，源码不再声明 global `Env`。
+Expected: `worker-configuration.d.ts` 与 `wrangler.jsonc` bindings 一致。源码中的 legacy global `Env`
+声明只服务未迁移消费者，并在 Task 13 删除。
 
-- [ ] **Step 6: 验证并提交**
+- [x] **Step 6: 验证并提交**
 
 ```bash
 npx vitest run --config vitest.config.ts tests/unit/request-context.test.ts tests/unit/runtime-config.test.ts
 npm run typecheck
 git diff --check
-git add src/app src/config/runtime.ts src/index.ts tests/unit/request-context.test.ts tests/unit/runtime-config.test.ts worker-configuration.d.ts
+git add src/app/types.ts src/app/request-context.ts src/config/runtime.ts tests/unit/runtime-config.test.ts
 git commit -m "refactor(runtime): 使用不可变配置快照"
 ```
 
