@@ -5,9 +5,8 @@ import {
   createFirstPacketReader,
   createRemoteConnWrapper,
   createRemoteWriterProvider,
-  type TransportBridge,
-  type RemoteConnWrapper,
 } from './bridge';
+import type { ConnectTCPFn } from '../networking/tcp-connector';
 import type { RequestContext } from '../app/types';
 import {
   createDnsUdpSession,
@@ -18,13 +17,7 @@ import {
 export function handleXHTTP(
   request: Request,
   ctx: RequestContext,
-  connectTCP: (
-    host: string,
-    port: number,
-    data: Uint8Array | null,
-    bridge: TransportBridge,
-    wrapper: RemoteConnWrapper,
-  ) => Promise<void>,
+  connectTCP: ConnectTCPFn,
   createDnsSession: typeof createDnsUdpSession = createDnsUdpSession,
 ): Response {
   if (!request.body) return new Response('Bad Request', { status: 400 });
@@ -69,7 +62,10 @@ export function handleXHTTP(
         };
 
         try {
-          const firstPacketReader = createFirstPacketReader(ctx.userId);
+          const firstPacketReader = createFirstPacketReader(
+            ctx.userId,
+            ctx.runtimeSnapshot?.secrets.trojanPassword,
+          );
           let firstPacket = null;
           while (!firstPacket) {
             const { value, done } = await reader.read();
@@ -84,6 +80,13 @@ export function handleXHTTP(
               return;
             }
             if (result.status === 'ok') firstPacket = result.packet;
+          }
+
+          if (
+            ctx.runtimeSnapshot &&
+            !ctx.runtimeSnapshot.config.inbound[firstPacket.protocol].enabled
+          ) {
+            throw new Error(`${firstPacket.protocol} is not enabled`);
           }
 
           let dnsSession: ReturnType<typeof createDnsUdpSession> | null = null;
@@ -107,6 +110,7 @@ export function handleXHTTP(
               firstPacket.rawData,
               bridge,
               wrapper,
+              firstPacket.protocol,
             );
           }
 

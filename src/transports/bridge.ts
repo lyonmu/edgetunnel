@@ -68,10 +68,11 @@ export interface ParsedFirstPacket {
 
 function parseFirstPacketInternal(
   data: Uint8Array,
-  token: string,
+  vlessToken: string,
+  trojanToken: string,
   logRejection: boolean,
 ): ParsedFirstPacket | null {
-  const vlessResult = parseVlessRequest(data, token);
+  const vlessResult = parseVlessRequest(data, vlessToken);
   if (vlessResult.ok) {
     const packet: ParsedFirstPacket = {
       protocol: 'vless',
@@ -85,7 +86,7 @@ function parseFirstPacketInternal(
     return packet;
   }
 
-  const trojanResult = parseTrojanRequest(data, token);
+  const trojanResult = parseTrojanRequest(data, trojanToken);
   if (trojanResult.ok) {
     return {
       protocol: 'trojan',
@@ -110,8 +111,12 @@ function parseFirstPacketInternal(
   return null;
 }
 
-export function parseFirstPacket(data: Uint8Array, token: string): ParsedFirstPacket | null {
-  return parseFirstPacketInternal(data, token, true);
+export function parseFirstPacket(
+  data: Uint8Array,
+  vlessToken: string,
+  trojanToken = vlessToken,
+): ParsedFirstPacket | null {
+  return parseFirstPacketInternal(data, vlessToken, trojanToken, true);
 }
 
 export { isValidWSEarlyData } from './common';
@@ -121,7 +126,11 @@ export type FirstPacketReadResult =
   | { status: 'invalid' }
   | { status: 'ok'; packet: ParsedFirstPacket };
 
-export function createFirstPacketReader(token: string, maxBytes = 64 * 1024) {
+export function createFirstPacketReader(
+  vlessToken: string,
+  trojanToken = vlessToken,
+  maxBytes = 64 * 1024,
+) {
   let pending = new Uint8Array(0);
 
   return {
@@ -129,11 +138,11 @@ export function createFirstPacketReader(token: string, maxBytes = 64 * 1024) {
       pending = new Uint8Array(concatBytes(pending, chunk));
       if (pending.byteLength > maxBytes) return { status: 'invalid' };
 
-      const packet = parseFirstPacketInternal(pending, token, false);
+      const packet = parseFirstPacketInternal(pending, vlessToken, trojanToken, false);
       if (packet) return { status: 'ok', packet };
 
-      const vless = parseVlessRequest(pending, token);
-      const trojan = parseTrojanRequest(pending, token);
+      const vless = parseVlessRequest(pending, vlessToken);
+      const trojan = parseTrojanRequest(pending, trojanToken);
       const vlessNeedsMore =
         pending.byteLength < 18 ||
         (!vless.ok && vless.error !== 'Invalid uuid' && /data|length/i.test(vless.error));
@@ -141,7 +150,7 @@ export function createFirstPacketReader(token: string, maxBytes = 64 * 1024) {
         pending.byteLength < 58 || (!trojan.ok && trojan.error === 'invalid S5 request data');
 
       if (vlessNeedsMore || trojanNeedsMore) return { status: 'need_more' };
-      parseFirstPacketInternal(pending, token, true);
+      parseFirstPacketInternal(pending, vlessToken, trojanToken, true);
       return { status: 'invalid' };
     },
   };

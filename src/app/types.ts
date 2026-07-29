@@ -59,6 +59,7 @@ export interface RequestContext {
   preloadRaceDial: boolean;
   dialConcurrency: number;
   proxy: ProxyRuntimeConfig;
+  runtimeSnapshot?: import('../config/runtime').RuntimeSnapshot;
 }
 
 export interface RuntimeEnv extends Env {

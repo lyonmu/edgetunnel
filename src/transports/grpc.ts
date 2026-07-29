@@ -5,8 +5,8 @@ import {
   createRemoteConnWrapper,
   createRemoteWriterProvider,
   type TransportBridge,
-  type RemoteConnWrapper,
 } from './bridge';
+import type { ConnectTCPFn } from '../networking/tcp-connector';
 import type { RequestContext } from '../app/types';
 import {
   createDnsUdpSession,
@@ -17,13 +17,7 @@ import {
 export function handleGRPC(
   request: Request,
   ctx: RequestContext,
-  connectTCP: (
-    host: string,
-    port: number,
-    data: Uint8Array | null,
-    bridge: TransportBridge,
-    wrapper: RemoteConnWrapper,
-  ) => Promise<void>,
+  connectTCP: ConnectTCPFn,
   createDnsSession: typeof createDnsUdpSession = createDnsUdpSession,
 ): Response {
   if (!request.body) return new Response('Bad Request', { status: 400 });
@@ -72,7 +66,10 @@ export function handleGRPC(
         try {
           let pending = new Uint8Array(0);
           let isFirstFrame = true;
-          const firstPacketReader = createFirstPacketReader(ctx.userId);
+          const firstPacketReader = createFirstPacketReader(
+            ctx.userId,
+            ctx.runtimeSnapshot?.secrets.trojanPassword,
+          );
           let dnsSession: ReturnType<typeof createDnsUdpSession> | null = null;
 
           while (true) {
@@ -105,6 +102,12 @@ export function handleGRPC(
                 if (result.status === 'invalid') throw new Error('Invalid first packet');
                 isFirstFrame = false;
                 const firstPacket = result.packet;
+                if (
+                  ctx.runtimeSnapshot &&
+                  !ctx.runtimeSnapshot.config.inbound[firstPacket.protocol].enabled
+                ) {
+                  throw new Error(`${firstPacket.protocol} is not enabled`);
+                }
 
                 if (firstPacket.isUDP) {
                   let dnsProtocol: DnsUdpProtocol = firstPacket.protocol;
@@ -130,6 +133,7 @@ export function handleGRPC(
                   firstPacket.rawData,
                   grpcBridge,
                   wrapper,
+                  firstPacket.protocol,
                 );
                 if (firstPacket.rawData.byteLength > 0) continue;
               } else {

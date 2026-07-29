@@ -5,7 +5,12 @@ import { handleSubscriptionRequest } from '../subscription/routes';
 import { handleWebSocket } from '../transports/websocket';
 import { handleGRPC } from '../transports/grpc';
 import { handleXHTTP } from '../transports/xhttp';
-import { createConnectTCP } from '../networking/tcp-connector';
+import { createRequestMetadata } from './request-context';
+import { loadRuntimeSnapshot } from '../config/runtime';
+import { SecretStore } from '../security/secret-store';
+import { createConnectorRegistry } from '../networking/connectors/registry';
+import { createDialer } from '../networking/dialer';
+import { createTunnelConnectTCP } from '../transports/session';
 import {
   camouflageResponse,
   routeLocations,
@@ -29,6 +34,25 @@ function isGRPCTraffic(request: Request): boolean {
   return !isXHTTP && contentType.startsWith('application/grpc');
 }
 
+async function createDataPlane(context: RequestContext) {
+  const metadata = createRequestMetadata(context.request, context.env, context.execution);
+  const snapshot = await loadRuntimeSnapshot(metadata);
+  const store = new SecretStore(context.env.KV, snapshot.secrets.configKey);
+  const dialer = createDialer(snapshot, {
+    registry: createConnectorRegistry(),
+    resolveCredential: (ref) => store.read(ref),
+  });
+  return {
+    snapshot,
+    connectTCP: createTunnelConnectTCP(dialer, context.request.signal),
+    context: {
+      ...context,
+      userId: snapshot.identity.vlessUuid,
+      runtimeSnapshot: snapshot,
+    } satisfies RequestContext,
+  };
+}
+
 export async function routeRequest(context: RequestContext): Promise<Response> {
   const { request, url } = context;
   const upgradeHeader = request.headers.get('Upgrade');
@@ -45,17 +69,31 @@ export async function routeRequest(context: RequestContext): Promise<Response> {
 
   // 3. WebSocket 代理
   if (context.adminPassword && upgradeHeader === 'websocket') {
-    const connectTCP = createConnectTCP(context);
-    return handleWebSocket(request, context, connectTCP);
+    const dataPlane = await createDataPlane(context);
+    if (
+      dataPlane.snapshot.config.transports.websocket.enabled &&
+      url.pathname === dataPlane.snapshot.config.transports.websocket.path
+    ) {
+      return handleWebSocket(request, dataPlane.context, dataPlane.connectTCP);
+    }
   }
 
   // 4. gRPC / XHTTP 代理 (POST, not admin/login)
   if (context.adminPassword && !isAdminPath(url.pathname) && request.method === 'POST') {
-    const connectTCP = createConnectTCP(context);
-    if (isGRPCTraffic(request)) {
-      return handleGRPC(request, context, connectTCP);
+    const dataPlane = await createDataPlane(context);
+    if (
+      isGRPCTraffic(request) &&
+      dataPlane.snapshot.config.transports.grpc.enabled &&
+      url.pathname === `/${dataPlane.snapshot.config.transports.grpc.serviceName}`
+    ) {
+      return handleGRPC(request, dataPlane.context, dataPlane.connectTCP);
     }
-    return handleXHTTP(request, context, connectTCP);
+    if (
+      dataPlane.snapshot.config.transports.xhttp.enabled &&
+      url.pathname === dataPlane.snapshot.config.transports.xhttp.path
+    ) {
+      return handleXHTTP(request, dataPlane.context, dataPlane.connectTCP);
+    }
   }
 
   // 5. HTTP → HTTPS 重定向

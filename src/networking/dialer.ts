@@ -12,6 +12,15 @@ export interface DialerDependencies {
   resolveCredential(ref: string): Promise<ProfileCredential | null>;
 }
 
+export interface Dialer {
+  connect(
+    target: DialTarget,
+    inbound: InboundProtocol,
+    signal: AbortSignal,
+    initialData?: Uint8Array,
+  ): Promise<DialResult>;
+}
+
 export class BlockedTargetError extends Error {
   constructor(readonly target: DialTarget) {
     super('目标地址已被安全策略阻止');
@@ -125,7 +134,7 @@ function abortError(): DOMException {
   return new DOMException('连接已取消', 'AbortError');
 }
 
-export function createDialer(snapshot: RuntimeSnapshot, dependencies: DialerDependencies) {
+export function createDialer(snapshot: RuntimeSnapshot, dependencies: DialerDependencies): Dialer {
   return {
     async connect(
       target: DialTarget,

@@ -91,6 +91,7 @@ describe('WebSocket transport', () => {
       new Uint8Array([0xaa]),
       expect.anything(),
       expect.anything(),
+      'trojan',
     );
     client.close();
   });
@@ -124,6 +125,7 @@ describe('WebSocket transport', () => {
       new Uint8Array([1, 2]),
       expect.anything(),
       expect.anything(),
+      'shadowsocks',
     );
     client.close();
   });

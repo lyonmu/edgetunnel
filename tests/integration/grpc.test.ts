@@ -103,6 +103,7 @@ describe('gRPC transport', () => {
       new Uint8Array([0xaa]),
       expect.anything(),
       expect.anything(),
+      'vless',
     );
   });
 

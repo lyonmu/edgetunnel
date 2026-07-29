@@ -80,6 +80,7 @@ describe('XHTTP transport', () => {
       new Uint8Array([0xaa]),
       expect.anything(),
       expect.anything(),
+      'vless',
     );
     await response.body?.cancel();
   });

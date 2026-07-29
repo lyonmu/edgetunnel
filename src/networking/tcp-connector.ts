@@ -1,4 +1,5 @@
 import type { RequestContext } from '../app/types';
+import type { InboundProtocol } from '../config/schema';
 import type { TransportBridge, RemoteConnWrapper } from '../transports/bridge';
 import { connectStreams, closeSocketQuietly } from './stream-pump';
 import {
@@ -22,6 +23,7 @@ export type ConnectTCPFn = (
   data: Uint8Array | null,
   bridge: TransportBridge,
   wrapper: RemoteConnWrapper,
+  inbound?: InboundProtocol,
 ) => Promise<void>;
 
 type StreamConnector = typeof connectStreams;

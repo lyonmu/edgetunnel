@@ -554,17 +554,17 @@ git commit -m "feat(dns): 支持 VLESS XUDP 查询"
 - Produces: `runInboundSession(duplex, snapshot, signal): Promise<void>`
 - Produces: WebSocket、gRPC gun、XHTTP stream-one adapters
 
-- [ ] **Step 1: 写生命周期失败测试**
+- [x] **Step 1: 写生命周期失败测试**
 
 覆盖客户端关闭、目标 EOF、目标 writable half-close、上行异常、下行异常、请求 abort、连接超时、
 队列超限和清理幂等；每个场景断言 reader/writer lock 释放且 socket.close 最多一次。
 
-- [ ] **Step 2: 写三传输等价性测试**
+- [x] **Step 2: 写三传输等价性测试**
 
 同一 VLESS TCP 首包通过 WS/gRPC/XHTTP 输入，断言 dialer 收到相同 target/initialPayload；目标返回
 相同字节，三个 adapter 都完整输出。
 
-- [ ] **Step 3: 运行测试确认当前失败**
+- [x] **Step 3: 运行测试确认当前失败**
 
 Run:
 
@@ -572,17 +572,17 @@ Run:
 npx vitest run --config vitest.config.ts tests/integration/transport-lifecycle.test.ts
 ```
 
-- [ ] **Step 4: 抽取统一入站会话**
+- [x] **Step 4: 抽取统一入站会话**
 
 保留现有协议 parser 和 bridge，抽取 transport-neutral duplex；adapter 只负责帧。所有资源清理由
 单个 `ConnectionScope` 管理，`close(reason)` 幂等。
 
-- [ ] **Step 5: 限定 gRPC/XHTTP 模式**
+- [x] **Step 5: 限定 gRPC/XHTTP 模式**
 
 gRPC 只接受 gun framing；XHTTP 只接受 stream-one。无法识别或需要跨请求状态的模式返回 400，
 不得写 KV 会话。
 
-- [ ] **Step 6: 验证并提交**
+- [x] **Step 6: 验证并提交**
 
 ```bash
 npx vitest run --config vitest.config.ts tests/integration/websocket.test.ts tests/integration/grpc.test.ts tests/integration/xhttp.test.ts tests/integration/transport-lifecycle.test.ts

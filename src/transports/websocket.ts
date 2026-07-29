@@ -7,8 +7,8 @@ import {
   createRemoteConnWrapper,
   createRemoteWriterProvider,
   type TransportBridge,
-  type RemoteConnWrapper,
 } from './bridge';
+import type { ConnectTCPFn } from '../networking/tcp-connector';
 import type { RequestContext } from '../app/types';
 import {
   createShadowsocksDecryptor,
@@ -29,13 +29,7 @@ interface HalfOpenWebSocket extends WebSocket {
 export function handleWebSocket(
   request: Request,
   ctx: RequestContext,
-  connectTCP: (
-    host: string,
-    port: number,
-    data: Uint8Array | null,
-    bridge: TransportBridge,
-    wrapper: RemoteConnWrapper,
-  ) => Promise<void>,
+  connectTCP: ConnectTCPFn,
   createDnsSession: typeof createDnsUdpSession = createDnsUdpSession,
 ): Response {
   const pair = new WebSocketPair();
@@ -76,9 +70,21 @@ export function handleWebSocket(
   const bridge = shadowsocksMethod
     ? createShadowsocksBridge(serverSock, ctx.userId, shadowsocksMethod)
     : createWebSocketBridge(serverSock);
-  const firstPacketReader = createFirstPacketReader(ctx.userId);
+  const firstPacketReader = createFirstPacketReader(
+    ctx.userId,
+    ctx.runtimeSnapshot?.secrets.trojanPassword,
+  );
+  if (
+    shadowsocksMethod &&
+    ctx.runtimeSnapshot &&
+    (!ctx.runtimeSnapshot.config.inbound.shadowsocks.enabled ||
+      shadowsocksMethod !== ctx.runtimeSnapshot.config.inbound.shadowsocks.method)
+  ) {
+    return new Response('Shadowsocks is not enabled', { status: 404 });
+  }
+  const shadowsocksPassword = ctx.runtimeSnapshot?.secrets.shadowsocksPassword ?? ctx.userId;
   const shadowsocksDecryptor = shadowsocksMethod
-    ? createShadowsocksDecryptor(ctx.userId, shadowsocksMethod)
+    ? createShadowsocksDecryptor(shadowsocksPassword, shadowsocksMethod)
     : null;
   const shadowsocksAddressReader = shadowsocksMethod ? createShadowsocksAddressReader() : null;
   let shadowsocksConnected = false;
@@ -95,7 +101,14 @@ export function handleWebSocket(
           if (result.status === 'need_more') continue;
           if (result.status === 'invalid') throw new Error('Invalid Shadowsocks address');
           const target = result.target;
-          await connectTCP(target.hostname, target.port, target.payload, bridge, wrapper);
+          await connectTCP(
+            target.hostname,
+            target.port,
+            target.payload,
+            bridge,
+            wrapper,
+            'shadowsocks',
+          );
           shadowsocksConnected = true;
         } else if (!uploadQueue!.enqueue(plaintext)) {
           throw new Error('Remote socket is not ready');
@@ -114,6 +127,12 @@ export function handleWebSocket(
       if (result.status === 'need_more') return;
       if (result.status === 'invalid') throw new Error('Invalid first packet');
       const firstPacket = result.packet;
+      if (
+        ctx.runtimeSnapshot &&
+        !ctx.runtimeSnapshot.config.inbound[firstPacket.protocol].enabled
+      ) {
+        throw new Error(`${firstPacket.protocol} is not enabled`);
+      }
       firstPacketHandled = true;
       if (firstPacket.isUDP) {
         let dnsProtocol: DnsUdpProtocol = firstPacket.protocol;
@@ -136,6 +155,7 @@ export function handleWebSocket(
         firstPacket.rawData,
         bridge,
         wrapper,
+        firstPacket.protocol,
       );
       return;
     }

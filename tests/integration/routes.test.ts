@@ -1,16 +1,28 @@
 import { createExecutionContext, env } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import worker from '../../src/index';
+import { createDefaultConfig } from '../../src/config/defaults';
+import { CONFIG_KEY } from '../../src/config/repository';
+import { encodeBase64Url } from '../../src/security/crypto';
 
 const uuid = '90cd4a77-141a-43c9-991b-08263cfe9c10';
+const configEncryptionKey = encodeBase64Url(Uint8Array.from({ length: 32 }, (_, index) => index));
 const adminEnv = {
   KV: env.KV,
   ASSETS: env.ASSETS,
   ADMIN: 'admin',
   UUID: uuid,
+  CONFIG_KEY: configEncryptionKey,
 };
 
 describe('route priority', () => {
+  beforeEach(async () => {
+    const config = createDefaultConfig();
+    config.transports.grpc.enabled = true;
+    config.transports.xhttp.enabled = true;
+    await env.KV.put(CONFIG_KEY, JSON.stringify(config));
+  });
+
   describe('HTTP → HTTPS redirect', () => {
     it('redirects http to https with 301', async () => {
       const req = new Request('http://example.com/some/path', {
@@ -71,7 +83,7 @@ describe('route priority', () => {
 
   describe('transport routes', () => {
     it('WebSocket upgrade is intercepted by transport handler', async () => {
-      const req = new Request('https://example.com/', {
+      const req = new Request('https://example.com/ws', {
         headers: {
           Upgrade: 'websocket',
           'Sec-WebSocket-Protocol': '',
@@ -84,7 +96,7 @@ describe('route priority', () => {
     });
 
     it('POST with grpc content-type is handled by gRPC transport', async () => {
-      const req = new Request('https://example.com/test', {
+      const req = new Request('https://example.com/edgetunnel', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/grpc',
@@ -99,7 +111,7 @@ describe('route priority', () => {
     });
 
     it('POST without grpc is handled by XHTTP transport', async () => {
-      const req = new Request('https://example.com/test', {
+      const req = new Request('https://example.com/xhttp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/octet-stream',
@@ -115,7 +127,7 @@ describe('route priority', () => {
     });
 
     it('POST with grpc content-type and x_padding referer is handled by XHTTP transport', async () => {
-      const req = new Request('https://example.com/test', {
+      const req = new Request('https://example.com/xhttp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/grpc',
