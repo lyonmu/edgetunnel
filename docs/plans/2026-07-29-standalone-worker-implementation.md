@@ -382,7 +382,7 @@ git commit -m "refactor(runtime): 使用不可变配置快照"
 - Produces: `/api/admin/v1/subscriptions/preview`
 - Produces: `/api/admin/v1/logs`
 
-- [ ] **Step 1: 写 API 合同测试**
+- [x] **Step 1: 写 API 合同测试**
 
 覆盖未认证 401、错误登录统一 401、Origin 不匹配 403、登录 Cookie、读取配置不返回 Secret、revision
 冲突 409、非法配置 422、凭据空值保持、显式删除、退出清 Cookie。
@@ -390,28 +390,28 @@ git commit -m "refactor(runtime): 使用不可变配置快照"
 同时覆盖日志条数上限、单条大小上限、写入失败不影响主请求，以及 password、token、Cookie、UUID 和
 完整客户端 IP 的脱敏。
 
-- [ ] **Step 2: 运行测试确认旧接口失败**
+- [x] **Step 2: 运行测试确认旧接口失败**
 
 Run: `npx vitest run --config vitest.config.ts tests/integration/admin.test.ts`
 
-- [ ] **Step 3: 实现统一响应和认证中间层**
+- [x] **Step 3: 实现统一响应和认证中间层**
 
 写接口仅接受 `application/json` 且 `Origin === new URL(request.url).origin`。错误 code 使用
 `AUTH_REQUIRED`、`INVALID_CREDENTIALS`、`INVALID_ORIGIN`、`CONFIG_INVALID`、
 `CONFIG_REVISION_CONFLICT`、`INTERNAL_ERROR`。
 
-- [ ] **Step 4: 实现 Service**
+- [x] **Step 4: 实现 Service**
 
 Service 组合 ConfigRepository、SecretStore、profile tester 和 LogRepository。更新 profile 时先校验
 配置，再写 Secret，最后保存配置；配置保存失败时删除本次新建的孤立 Secret ref。LogRepository
 只接受结构化安全事件，保留配置指定的最近记录，KV 写失败由 `execution.waitUntil()` 隔离。
 
-- [ ] **Step 5: 删除旧管理 API 路由**
+- [x] **Step 5: 删除旧管理 API 路由**
 
 `/admin/config.json`、`/admin/ADD.txt`、`/admin/tg.json`、`/admin/cf.json`、
 `/admin/log.json` 和 `/admin/init` 返回 404，不再访问旧 KV key。
 
-- [ ] **Step 6: 验证并提交**
+- [x] **Step 6: 验证并提交**
 
 ```bash
 npx vitest run --config vitest.config.ts tests/unit/admin-service.test.ts tests/unit/log-repository.test.ts

@@ -1,121 +1,151 @@
 import { createExecutionContext, env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import worker from '../../src/index';
-import { md5Twice } from '../../src/shared/hash';
+import { CONFIG_KEY } from '../../src/config/repository';
+import { SECRET_STORE_KEY } from '../../src/security/secret-store';
+import { encodeBase64Url } from '../../src/security/crypto';
 
 const uuid = '90cd4a77-141a-43c9-991b-08263cfe9c10';
-const userAgent = 'edgetunnel-test';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+const origin = 'https://example.com';
+const configEncryptionKey = encodeBase64Url(Uint8Array.from({ length: 32 }, (_, index) => index));
 
 function testEnv(): Env {
   return {
     KV: env.KV,
     ASSETS: env.ASSETS,
     ADMIN: 'admin',
-    KEY: 'test-key',
     UUID: uuid,
+    CONFIG_KEY: configEncryptionKey,
   };
 }
 
 async function fetchWorker(path: string, init?: RequestInit): Promise<Response> {
-  return worker.fetch(
-    new Request(`https://example.com${path}`, init),
-    testEnv(),
-    createExecutionContext(),
-  );
+  return worker.fetch(new Request(`${origin}${path}`, init), testEnv(), createExecutionContext());
 }
 
 async function loginCookie(): Promise<string> {
-  const response = await fetchWorker('/login', {
+  const response = await fetchWorker('/api/admin/v1/session', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': userAgent,
-    },
-    body: 'password=admin',
+    headers: { 'Content-Type': 'application/json', Origin: origin },
+    body: JSON.stringify({ password: 'admin' }),
   });
-  expect(response.status).toBe(200);
+  expect(response.status).toBe(201);
   return response.headers.get('Set-Cookie')?.split(';')[0] ?? '';
 }
 
-describe('admin routes', () => {
+describe('versioned admin API', () => {
   beforeEach(async () => {
     await Promise.all(
-      ['config.json', 'tg.json', 'cf.json', 'ADD.txt', 'log.json'].map((key) => env.KV.delete(key)),
+      [CONFIG_KEY, SECRET_STORE_KEY, 'edgetunnel:logs:v1', 'config.json'].map((key) =>
+        env.KV.delete(key),
+      ),
     );
   });
 
-  it('authenticates and serves the local admin asset', async () => {
-    const unauthenticated = await fetchWorker('/admin', {
-      headers: { 'User-Agent': userAgent },
-    });
-    expect(unauthenticated.status).toBe(302);
-    expect(unauthenticated.headers.get('Location')).toBe('/login');
-
-    const cookie = await loginCookie();
-    const authenticated = await fetchWorker('/admin', {
-      headers: { Cookie: cookie, 'User-Agent': userAgent },
+  it('does not route an admin POST into XHTTP', async () => {
+    const response = await fetchWorker('/api/admin/v1/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: origin },
+      body: JSON.stringify({ password: 'wrong' }),
     });
 
-    expect(authenticated.status).toBe(200);
-    expect(await authenticated.text()).toContain('优选');
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'INVALID_CREDENTIALS' },
+    });
   });
 
-  it('reads and saves compatible config JSON', async () => {
+  it('creates and verifies a hardened session', async () => {
     const cookie = await loginCookie();
-    const headers = {
-      Cookie: cookie,
-      'User-Agent': userAgent,
-    };
-    const initial = await fetchWorker('/admin/config.json', { headers });
-    const initialValue: unknown = await initial.json();
-    if (!isRecord(initialValue)) {
-      throw new Error('Expected config object');
+    expect(cookie).toMatch(/^edt_session=/);
+
+    const response = await fetchWorker('/api/admin/v1/session', {
+      headers: { Cookie: cookie },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { authenticated: true } });
+  });
+
+  it('rejects unauthenticated config access', async () => {
+    const response = await fetchWorker('/api/admin/v1/config');
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'AUTH_REQUIRED' },
+    });
+  });
+
+  it('reads and updates v1 config with revision conflict protection', async () => {
+    const cookie = await loginCookie();
+    const initial = await fetchWorker('/api/admin/v1/config', {
+      headers: { Cookie: cookie },
+    });
+    const initialBody = (await initial.json()) as { data: { config: Record<string, unknown> } };
+    expect(initialBody.data.config).toMatchObject({ schemaVersion: 1, revision: 1 });
+    expect(JSON.stringify(initialBody)).not.toContain(configEncryptionKey);
+
+    const config = structuredClone(initialBody.data.config);
+    (config.observability as Record<string, unknown>).logLevel = 'info';
+    const saved = await fetchWorker('/api/admin/v1/config', {
+      method: 'PUT',
+      headers: {
+        Cookie: cookie,
+        Origin: origin,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ config, expectedRevision: 1 }),
+    });
+    expect(saved.status).toBe(200);
+    await expect(saved.json()).resolves.toMatchObject({
+      data: { config: { revision: 2, observability: { logLevel: 'info' } } },
+    });
+
+    const stale = await fetchWorker('/api/admin/v1/config', {
+      method: 'PUT',
+      headers: {
+        Cookie: cookie,
+        Origin: origin,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ config, expectedRevision: 1 }),
+    });
+    expect(stale.status).toBe(409);
+    await expect(stale.json()).resolves.toMatchObject({
+      error: { code: 'CONFIG_REVISION_CONFLICT' },
+    });
+  });
+
+  it('rejects cross-origin state changes', async () => {
+    const cookie = await loginCookie();
+    const response = await fetchWorker('/api/admin/v1/config', {
+      method: 'PUT',
+      headers: {
+        Cookie: cookie,
+        Origin: 'https://attacker.example',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ config: {}, expectedRevision: 1 }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'INVALID_ORIGIN' },
+    });
+  });
+
+  it('expires the session and removes old compatibility APIs', async () => {
+    const cookie = await loginCookie();
+    const logout = await fetchWorker('/api/admin/v1/session', {
+      method: 'DELETE',
+      headers: { Cookie: cookie, Origin: origin },
+    });
+    expect(logout.status).toBe(204);
+    expect(logout.headers.get('Set-Cookie')).toContain('Max-Age=0');
+
+    for (const path of ['/admin/config.json', '/admin/ADD.txt', '/admin/log.json']) {
+      const response = await fetchWorker(path, { headers: { Cookie: cookie } });
+      expect(response.status).toBe(404);
     }
-    const initialConfig = initialValue;
-    expect(initial.status).toBe(200);
-    expect(initialConfig.UUID).toBe(uuid);
-    expect((initialConfig.优选订阅生成 as Record<string, unknown> | undefined)?.TOKEN).toBe(
-      await md5Twice(`example.com${uuid}`),
-    );
-
-    const savedConfig = { ...initialConfig, HOST: 'saved.example', UUID: uuid };
-    const saved = await fetchWorker('/admin/config.json', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify(savedConfig),
-    });
-    expect(saved.status).toBe(200);
-
-    const stored = JSON.parse((await env.KV.get('config.json')) ?? '{}') as Record<string, unknown>;
-    expect(stored.HOST).toBe('saved.example');
-  });
-
-  it('round-trips ADD.txt and returns log arrays', async () => {
-    const cookie = await loginCookie();
-    const headers = { Cookie: cookie, 'User-Agent': userAgent };
-    const saved = await fetchWorker('/admin/ADD.txt', {
-      method: 'POST',
-      headers,
-      body: '1.1.1.1:443#test',
-    });
-    expect(saved.status).toBe(200);
-
-    const read = await fetchWorker('/admin/ADD.txt', { headers });
-    expect(await read.text()).toBe('1.1.1.1:443#test');
-
-    const logs = await fetchWorker('/admin/log.json', { headers });
-    expect(await logs.json()).toEqual([]);
-  });
-
-  it('clears the session on logout', async () => {
-    const response = await fetchWorker('/logout');
-
-    expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('/login');
-    expect(response.headers.get('Set-Cookie')).toContain('Max-Age=0');
   });
 });

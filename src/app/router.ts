@@ -14,7 +14,12 @@ import {
 } from './response';
 
 function isAdminPath(pathname: string): boolean {
-  return pathname.startsWith('/admin/') || pathname === '/login';
+  return (
+    pathname.startsWith('/admin/') ||
+    pathname === '/admin' ||
+    pathname === '/login' ||
+    pathname.startsWith('/api/admin/')
+  );
 }
 
 function isGRPCTraffic(request: Request): boolean {
@@ -32,13 +37,19 @@ export async function routeRequest(context: RequestContext): Promise<Response> {
   const version = routeVersion(context);
   if (version) return version;
 
-  // 2. WebSocket 代理
+  // 2. 管理 API 必须优先于 POST 数据面。
+  if (isAdminPath(url.pathname)) {
+    const admin = await routeAdminRequest(context);
+    if (admin) return admin;
+  }
+
+  // 3. WebSocket 代理
   if (context.adminPassword && upgradeHeader === 'websocket') {
     const connectTCP = createConnectTCP(context);
     return handleWebSocket(request, context, connectTCP);
   }
 
-  // 3. gRPC / XHTTP 代理 (POST, not admin/login)
+  // 4. gRPC / XHTTP 代理 (POST, not admin/login)
   if (context.adminPassword && !isAdminPath(url.pathname) && request.method === 'POST') {
     const connectTCP = createConnectTCP(context);
     if (isGRPCTraffic(request)) {
@@ -47,7 +58,7 @@ export async function routeRequest(context: RequestContext): Promise<Response> {
     return handleXHTTP(request, context, connectTCP);
   }
 
-  // 4. HTTP → HTTPS 重定向
+  // 5. HTTP → HTTPS 重定向
   if (url.protocol === 'http:') {
     const secure = new URL(url);
     secure.protocol = 'https:';
@@ -83,7 +94,7 @@ export async function routeRequest(context: RequestContext): Promise<Response> {
   const quickSubscription = await routeQuickSubscription(context);
   if (quickSubscription) return quickSubscription;
 
-  // 8. 管理后台路由
+  // 8. 其余管理后台路由
   const admin = await routeAdminRequest(context);
   if (admin) {
     return admin;

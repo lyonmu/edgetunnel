@@ -6,6 +6,31 @@ import { md5Twice } from '../shared/hash';
 const WORKER_VERSION = 20260617014121;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export function jsonData(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify({ data }), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
+export function jsonError(
+  code: string,
+  message: string,
+  requestId: string,
+  status: number,
+): Response {
+  return new Response(JSON.stringify({ error: { code, message, requestId } }), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
 function identifierPartSum(identifier: string): number {
   let sum = 0;
   for (let index = 0; index < 8; index++) {

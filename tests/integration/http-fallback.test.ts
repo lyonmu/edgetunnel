@@ -105,14 +105,21 @@ describe('pure Worker HTTP fallback routes', () => {
     expect(await response.text()).toContain('Welcome to nginx!');
   });
 
-  it('serves the noKV page when the binding is absent', async () => {
+  it('returns a structured service error when the admin API has no KV binding', async () => {
     const response = await worker.fetch(
-      new Request('https://example.com/admin'),
-      { ASSETS: env.ASSETS, ADMIN: admin, UUID: uuid } as Env,
+      new Request('https://example.com/api/admin/v1/config'),
+      {
+        ASSETS: env.ASSETS,
+        ADMIN: admin,
+        UUID: uuid,
+        CONFIG_KEY: 'not-used-without-kv',
+      } as Env,
       createExecutionContext(),
     );
 
-    expect(response.status).toBe(404);
-    expect(await response.text()).toContain('KV');
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'RUNTIME_NOT_CONFIGURED' },
+    });
   });
 });

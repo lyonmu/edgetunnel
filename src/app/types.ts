@@ -20,6 +20,9 @@ declare global {
     PRELOAD_RACE_DIAL?: string;
     SUBAPI?: string;
     SUBCONFIG?: string;
+    CONFIG_KEY?: string;
+    TROJAN_PASSWORD?: string;
+    SHADOWSOCKS_PASSWORD?: string;
   }
 }
 
