@@ -1,6 +1,7 @@
 import { createExecutionContext, env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import worker from '../../src/index';
+import { md5Twice } from '../../src/shared/hash';
 
 const uuid = '90cd4a77-141a-43c9-991b-08263cfe9c10';
 const userAgent = 'edgetunnel-test';
@@ -77,6 +78,9 @@ describe('admin routes', () => {
     const initialConfig = initialValue;
     expect(initial.status).toBe(200);
     expect(initialConfig.UUID).toBe(uuid);
+    expect((initialConfig.优选订阅生成 as Record<string, unknown> | undefined)?.TOKEN).toBe(
+      await md5Twice(`example.com${uuid}`),
+    );
 
     const savedConfig = { ...initialConfig, HOST: 'saved.example', UUID: uuid };
     const saved = await fetchWorker('/admin/config.json', {

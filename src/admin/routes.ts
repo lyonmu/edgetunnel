@@ -5,6 +5,8 @@ import { loadStoredConfig, saveStoredConfig } from '../config/repository';
 import { buildRuntimeConfig } from '../config/runtime';
 import { LogRepository } from '../storage/log-repository';
 import { fetchAdminAsset } from './assets';
+import { md5Twice } from '../shared/hash';
+import type { StoredConfig } from '../config/types';
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value, null, 2), {
@@ -28,6 +30,12 @@ async function expectedAuthToken(context: RequestContext): Promise<string> {
 async function isAuthenticated(context: RequestContext): Promise<boolean> {
   const cookie = readAuthCookie(context.request);
   return Boolean(cookie && cookie === (await expectedAuthToken(context)));
+}
+
+async function buildAdminRuntime(context: RequestContext, stored: StoredConfig) {
+  const runtime = buildRuntimeConfig(stored, context);
+  runtime.优选订阅生成.TOKEN = await md5Twice(`${context.host}${context.userId}`);
+  return runtime;
 }
 
 async function handleLogin(context: RequestContext): Promise<Response> {
@@ -61,12 +69,12 @@ async function handleAdmin(context: RequestContext): Promise<Response> {
     return json(context.request.cf ?? {});
   }
   const stored = await loadStoredConfig(context.env.KV, context.host, context.userId);
-  const runtime = buildRuntimeConfig(stored, context);
+  const runtime = await buildAdminRuntime(context, stored);
 
   if (path === '/admin/init') {
     const defaults = createDefaultConfig(context.host, context.userId);
     await saveStoredConfig(context.env.KV, defaults);
-    return json({ ...buildRuntimeConfig(defaults, context), init: '配置已重置为默认值' });
+    return json({ ...(await buildAdminRuntime(context, defaults)), init: '配置已重置为默认值' });
   }
 
   if (context.request.method === 'POST') {
