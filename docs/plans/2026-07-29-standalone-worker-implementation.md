@@ -501,16 +501,16 @@ git commit -m "refactor(network): 统一出站配置与拨号"
 - Produces: `encodeXudpDatagram(datagram): Uint8Array`
 - Produces: `createDnsDatagramSession({ mode, doh, limits }): DnsDatagramSession`
 
-- [ ] **Step 1: 写 XUDP 分片测试**
+- [x] **Step 1: 写 XUDP 分片测试**
 
 覆盖单帧、多帧、header/payload 任意分片、零长度、超长数据报、非法地址和流结束残帧。
 
-- [ ] **Step 2: 写统一 DNS 会话测试**
+- [x] **Step 2: 写统一 DNS 会话测试**
 
 同一 DNS query 分别以 PacketAddr 和 XUDP 输入，断言 DoH 收到相同 message 且输出使用对应编码；
 非 53 端口、并发超限、超时和超大响应均关闭会话。
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 Run:
 
@@ -518,12 +518,12 @@ Run:
 npx vitest run --config vitest.config.ts tests/unit/xudp.test.ts tests/unit/udp-dns.test.ts
 ```
 
-- [ ] **Step 4: 实现增量 decoder 并接入 VLESS**
+- [x] **Step 4: 实现增量 decoder 并接入 VLESS**
 
 decoder 保留未完成帧但总缓冲不超过配置上限。VLESS UDP 根据首个有效帧区分 PacketAddr/XUDP；
 Trojan 和 Shadowsocks 的非 TCP 命令明确拒绝。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```bash
 npx vitest run --config vitest.config.ts tests/unit/xudp.test.ts tests/unit/udp-dns.test.ts tests/unit/vless.test.ts tests/unit/dns.test.ts

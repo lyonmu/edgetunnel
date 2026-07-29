@@ -1,13 +1,14 @@
 import type { TransportBridge } from '../transports/bridge';
 import { concatBytes } from '../shared/bytes';
 import { cloudflareSocketConnector, type SocketConnector } from './sockets';
+import { XudpDecoder, encodeXudpDatagram } from './xudp';
 
 const DNS_SERVER = { hostname: '8.8.4.4', port: 53 } as const;
 const DNS_DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query';
 const DNS_TIMEOUT_MS = 10_000;
 
 export type DnsQuery = (payload: Uint8Array) => Promise<Uint8Array>;
-export type DnsUdpProtocol = 'vless' | 'vless-packetaddr' | 'trojan';
+export type DnsUdpProtocol = 'vless' | 'vless-packetaddr' | 'vless-xudp' | 'trojan';
 type DnsFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export function isVlessPacketAddrTarget(hostname: string, port: number): boolean {
@@ -125,9 +126,9 @@ export function createDnsUdpSession(
 ) {
   let pending: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   let header = responseHeader;
+  const xudpDecoder = protocol === 'vless-xudp' ? new XudpDecoder() : null;
 
-  const sendResponse = (payload: Uint8Array) => {
-    const framed = dnsFrame(payload);
+  const sendFramedResponse = (framed: Uint8Array) => {
     if (!header) {
       send(bridge, framed);
       return;
@@ -135,6 +136,7 @@ export function createDnsUdpSession(
     send(bridge, new Uint8Array(concatBytes(header, framed)));
     header = null;
   };
+  const sendResponse = (payload: Uint8Array) => sendFramedResponse(dnsFrame(payload));
 
   const processVless = async () => {
     while (pending.byteLength >= 2) {
@@ -227,8 +229,27 @@ export function createDnsUdpSession(
     }
   };
 
+  const processXudp = async (chunk: Uint8Array) => {
+    for (const datagram of xudpDecoder!.push(chunk)) {
+      if (datagram.destination.port !== 53) throw new Error('UDP is not supported');
+      if (!datagram.payload.byteLength) continue;
+      const response = await query(datagram.payload);
+      sendFramedResponse(
+        encodeXudpDatagram({
+          status: 'keep',
+          destination: datagram.destination,
+          payload: response,
+        }),
+      );
+    }
+  };
+
   return {
     async push(chunk: Uint8Array): Promise<void> {
+      if (protocol === 'vless-xudp') {
+        await processXudp(chunk);
+        return;
+      }
       if (chunk.byteLength) pending = new Uint8Array(concatBytes(pending, chunk));
       if (protocol === 'vless') await processVless();
       else if (protocol === 'vless-packetaddr') await processVlessPacketAddr();

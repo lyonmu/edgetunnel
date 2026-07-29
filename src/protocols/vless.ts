@@ -1,7 +1,13 @@
 import { toUint8Array, matchesUuid } from '../shared/bytes';
 
 export type VlessParseResult =
-  | { ok: true; command: 'tcp' | 'udp'; hostname: string; port: number; payload: Uint8Array }
+  | {
+      ok: true;
+      command: 'tcp' | 'udp' | 'xudp';
+      hostname: string;
+      port: number;
+      payload: Uint8Array;
+    }
   | { ok: false; error: string };
 
 export function parseVlessRequest(
@@ -26,11 +32,13 @@ export function parseVlessRequest(
   }
 
   const cmd = data[cmdIndex];
-  let command: 'tcp' | 'udp';
+  let command: 'tcp' | 'udp' | 'xudp';
   if (cmd === 1) {
     command = 'tcp';
   } else if (cmd === 2) {
     command = 'udp';
+  } else if (cmd === 3) {
+    command = 'xudp';
   } else {
     return { ok: false, error: 'Invalid command' };
   }
@@ -81,6 +89,9 @@ export function parseVlessRequest(
 
   if (!hostname) {
     return { ok: false, error: 'Empty hostname' };
+  }
+  if (command === 'xudp' && (hostname.toLowerCase() !== 'v1.mux.cool' || port !== 666)) {
+    return { ok: false, error: 'Invalid XUDP Mux target' };
   }
 
   const payloadOffset = addrValIdx + addrLen;

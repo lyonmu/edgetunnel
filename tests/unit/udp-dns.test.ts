@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TransportBridge } from '../../src/transports/bridge';
 import { createDnsUdpSession, queryDnsDoh } from '../../src/networking/udp-dns';
+import { encodeXudpDatagram } from '../../src/networking/xudp';
 
 function collectingBridge() {
   const sent: Uint8Array[] = [];
@@ -83,5 +84,30 @@ describe('DNS UDP session', () => {
     const frame = new Uint8Array([1, 192, 0, 2, 1, 0, 80, 0, 1, 13, 10, 1]);
 
     await expect(session.push(frame)).rejects.toThrow('UDP is not supported');
+  });
+
+  it('forwards and re-encapsulates fragmented Single XUDP DNS frames', async () => {
+    const { bridge, sent } = collectingBridge();
+    const query = vi.fn(async () => new Uint8Array([7, 8]));
+    const session = createDnsUdpSession('vless-xudp', bridge, new Uint8Array([0, 0]), query);
+    const frame = encodeXudpDatagram({
+      status: 'new',
+      destination: {
+        hostname: '1.1.1.1',
+        port: 53,
+        addressType: 1,
+        addressBytes: new Uint8Array([1, 1, 1, 1]),
+      },
+      globalId: new Uint8Array(8),
+      payload: new Uint8Array([3, 4]),
+    });
+
+    await session.push(frame.slice(0, 7));
+    await session.push(frame.slice(7));
+
+    expect(query).toHaveBeenCalledWith(new Uint8Array([3, 4]));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.slice(0, 2)).toEqual(new Uint8Array([0, 0]));
+    expect(sent[0]?.slice(-2)).toEqual(new Uint8Array([7, 8]));
   });
 });

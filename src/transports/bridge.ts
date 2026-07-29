@@ -61,6 +61,7 @@ export interface ParsedFirstPacket {
   hostname: string;
   port: number;
   isUDP: boolean;
+  udpMode?: 'xudp';
   rawData: Uint8Array;
   respHeader: Uint8Array | null;
 }
@@ -72,14 +73,16 @@ function parseFirstPacketInternal(
 ): ParsedFirstPacket | null {
   const vlessResult = parseVlessRequest(data, token);
   if (vlessResult.ok) {
-    return {
+    const packet: ParsedFirstPacket = {
       protocol: 'vless',
       hostname: vlessResult.hostname,
       port: vlessResult.port,
-      isUDP: vlessResult.command === 'udp',
+      isUDP: vlessResult.command !== 'tcp',
       rawData: vlessResult.payload || new Uint8Array(0),
       respHeader: new Uint8Array([0, 0]),
     };
+    if (vlessResult.command === 'xudp') packet.udpMode = 'xudp';
+    return packet;
   }
 
   const trojanResult = parseTrojanRequest(data, token);

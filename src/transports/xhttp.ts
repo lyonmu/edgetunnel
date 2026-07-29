@@ -89,7 +89,9 @@ export function handleXHTTP(
           let dnsSession: ReturnType<typeof createDnsUdpSession> | null = null;
           if (firstPacket.isUDP) {
             let dnsProtocol: DnsUdpProtocol = firstPacket.protocol;
-            if (firstPacket.protocol === 'vless' && firstPacket.port !== 53) {
+            if (firstPacket.protocol === 'vless' && firstPacket.udpMode === 'xudp') {
+              dnsProtocol = 'vless-xudp';
+            } else if (firstPacket.protocol === 'vless' && firstPacket.port !== 53) {
               if (!isVlessPacketAddrTarget(firstPacket.hostname, firstPacket.port)) {
                 throw new Error('UDP is not supported');
               }
