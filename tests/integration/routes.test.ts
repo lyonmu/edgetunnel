@@ -114,6 +114,22 @@ describe('route priority', () => {
       expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
     });
 
+    it('POST with grpc content-type and x_padding referer is handled by XHTTP transport', async () => {
+      const req = new Request('https://example.com/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/grpc',
+          Referer: 'https://example.com/?x_padding=1',
+        },
+        body: new Uint8Array([0]),
+        cf: { country: 'US', colo: 'SJC', asn: 13335 },
+      });
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(req, adminEnv, ctx);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
+    });
+
     it('POST to /admin/ is not intercepted by transport routes', async () => {
       const req = new Request('https://example.com/admin/config.json', {
         method: 'POST',

@@ -19,7 +19,9 @@ function isAdminPath(pathname: string): boolean {
 
 function isGRPCTraffic(request: Request): boolean {
   const contentType = request.headers.get('Content-Type') || '';
-  return contentType.startsWith('application/grpc');
+  const referer = request.headers.get('Referer') || '';
+  const isXHTTP = referer.includes('x_padding');
+  return !isXHTTP && contentType.startsWith('application/grpc');
 }
 
 export async function routeRequest(context: RequestContext): Promise<Response> {
