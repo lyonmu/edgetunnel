@@ -53,6 +53,20 @@ describe('subscription routes', () => {
     expect(await response.text()).toMatch(/^vless:\/\//);
   });
 
+  it('generates Shadowsocks plugin links with cipher routing and mux disabled', async () => {
+    const config = createDefaultConfig(host, uuid);
+    config.协议类型 = 'ss';
+    config.PATH = '/proxy';
+    await env.KV.put('config.json', JSON.stringify(config));
+
+    const response = await fetchWorker('/sub', 'Mozilla/5.0');
+    const link = new URL(await response.text());
+    const plugin = link.searchParams.get('plugin');
+
+    expect(plugin).toContain('path=/proxy?enc=aes-128-gcm');
+    expect(plugin).toContain(';mux=0');
+  });
+
   it('does not expose subscription data without a valid token', async () => {
     const response = await fetchWorker('/sub', 'Mozilla/5.0', false);
 

@@ -128,7 +128,9 @@ function generateNodeLink(address: string, config: SubscriptionConfig): string |
   const transportConfig = getTransportConfig(config);
 
   if (config.protocol === 'ss') {
-    const plugin = `v2ray-plugin;mode=websocket;host=${config.host};path=${config.path}${config.ss.TLS ? ';tls' : ''}`;
+    const pathSeparator = config.path.includes('?') ? '&' : '?';
+    const ssPath = `${config.path}${pathSeparator}enc=${config.ss.加密方式}`;
+    const plugin = `v2ray-plugin;mode=websocket;host=${config.host};path=${ssPath}${config.ss.TLS ? ';tls' : ''};mux=0`;
     return `ss://${btoa(config.ss.加密方式 + ':' + config.uuid)}@${host}:${port}?plugin=${encodeURIComponent(plugin)}#${encodeURIComponent(remark)}`;
   }
 
